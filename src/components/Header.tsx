@@ -1,6 +1,7 @@
 import React from 'react';
-import { Sparkles, Settings } from 'lucide-react';
+import { Settings } from 'lucide-react';
 import { UserProfile } from '../types';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
   userProfile: UserProfile;
@@ -44,14 +45,17 @@ export const Header: React.FC<HeaderProps> = ({ userProfile, onOpenProfile }) =>
         </p>
       </div>
 
-      <button
-        id="btn-header-profile"
-        onClick={onOpenProfile}
-        className="flex items-center gap-1 text-xs font-semibold text-stone-600 bg-white hover:bg-stone-50 border border-stone-200/80 px-2.5 py-1.5 rounded-full transition shadow-xs active:scale-95"
-      >
-        <Settings className="w-3.5 h-3.5 text-stone-500" />
-        <span>偏好设置</span>
-      </button>
+      <div className="flex items-center gap-2">
+        <PWAInstallButton />
+        <button
+          id="btn-header-profile"
+          onClick={onOpenProfile}
+          className="flex items-center gap-1 text-xs font-semibold text-stone-600 bg-white hover:bg-stone-50 border border-stone-200/80 px-2.5 py-1.5 rounded-full transition shadow-xs active:scale-95"
+        >
+          <Settings className="w-3.5 h-3.5 text-stone-500" />
+          <span>偏好设置</span>
+        </button>
+      </div>
     </header>
   );
 };

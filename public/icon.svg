@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Warm orange gradient background -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FB923C" />
+      <stop offset="100%" stop-color="#EA580C" />
+    </linearGradient>
+    <filter id="subtleShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#7C2D12" flood-opacity="0.25" />
+    </filter>
+  </defs>
+
+  <!-- Orange rounded rectangle background -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+
+  <!-- Cutlery & Cloche/Bowl Icon in pure crisp white with shadow -->
+  <g filter="url(#subtleShadow)" fill="#FFFFFF">
+    <!-- Plate / Center Dish rim -->
+    <circle cx="256" cy="256" r="108" fill="none" stroke="#FFFFFF" stroke-width="16" opacity="0.95" />
+    <circle cx="256" cy="256" r="76" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-dasharray="8 8" opacity="0.6" />
+
+    <!-- Fork (Left side) -->
+    <g transform="translate(142, 170)">
+      <!-- Fork handle -->
+      <rect x="18" y="70" width="8" height="102" rx="4" />
+      <!-- Fork base -->
+      <path d="M6 35 C6 58 38 58 38 35 L38 30 L6 30 Z" />
+      <!-- Fork tines -->
+      <rect x="6" y="2" width="5" height="32" rx="2.5" />
+      <rect x="15" y="2" width="5" height="32" rx="2.5" />
+      <rect x="24" y="2" width="5" height="32" rx="2.5" />
+      <rect x="33" y="2" width="5" height="32" rx="2.5" />
+    </g>
+
+    <!-- Spoon (Right side) -->
+    <g transform="translate(326, 170)">
+      <!-- Spoon head (smooth oval) -->
+      <path d="M22 0 C9 0 0 16 0 36 C0 54 10 66 22 66 C34 66 44 54 44 36 C44 16 35 0 22 0 Z" />
+      <!-- Spoon handle -->
+      <rect x="18" y="66" width="8" height="106" rx="4" />
+    </g>
+
+    <!-- Warm Chef Sparkle / Delight accent in the center -->
+    <path d="M256 228 C256 244 244 256 228 256 C244 256 256 268 256 284 C256 268 268 256 284 256 C268 256 256 244 256 228 Z" opacity="0.9" />
+  </g>
+</svg>
