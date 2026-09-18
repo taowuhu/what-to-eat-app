@@ -1,0 +1,7 @@
+{
+  "name": "今天吃什么",
+  "description": "面向上班族的健康饮食决策与家常食谱智能搭配助手",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
