@@ -1,20 +1,76 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+<p align="center">
+  <img src="public/images/github-banner.png" alt="今天吃什么宣传图" width="100%" />
+</p>
 
-# Run and deploy your AI Studio app
+# 今天吃什么
 
-This contains everything you need to run your app locally.
+一个面向打工人健康饮食的轻量应用。
 
-View your app in AI Studio: https://ai.studio/apps/c0e3fb2f-6ca8-46d1-93c2-75fd92251e97
+不知道今天吃什么？
+告诉 App 你家里有什么、想吃什么、几个人吃，它就能帮你快速决定今天吃什么，并提供简单清晰的做饭步骤。
 
-## Run Locally
+---
 
-**Prerequisites:**  Node.js
+## 核心功能
 
+- 帮我选一顿
+- 帮我安排一天
+- 家里有什么 / 清冰箱推荐
+- 145 道家常健康食谱
+- 采购清单
+- 1～4 人份动态换算
+- 收藏与偏好记忆
+- 做饭反馈与推荐优化
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+---
+
+## 项目定位
+
+这不是一个复杂的营养管理平台，而是一个更轻量、更实用的：
+
+**今天吃什么决策工具 + 做饭指导工具**
+
+---
+
+## 当前版本
+
+**V0.4.3 — First Usable MVP**
+
+---
+
+## 技术栈
+
+- Vite
+- React
+- TypeScript
+- LocalStorage
+
+---
+
+## 适合谁
+
+- 下班后不知道吃什么的人
+- 想健康一点但不想做复杂记录的人
+- 希望根据家里现有食材快速做决定的人
+- 想用更轻量方式规划一顿饭或一天三餐的人
+
+---
+
+## 后续方向
+
+- PWA 可安装版本
+- 一周菜单规划
+- 更真实的做饭时间与步骤优化
+- 更完善的食材匹配与推荐体验
+
+---
+
+## 使用说明
+
+本项目当前为 MVP 阶段，主要用于真实试用与产品验证。
+
+如需本地运行：
+
+```bash
+npm install
+npm run dev
