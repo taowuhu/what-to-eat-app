@@ -10,6 +10,8 @@ import { SOUP_RECIPES } from './soups';
 import { STAPLE_RECIPES } from './staples';
 import { ADDITIONAL_RECIPES, createRecipeItem } from './expanded_catalog';
 import { COMPREHENSIVE_RECIPES } from './comprehensive_registry';
+import { RICE_COOKER_RECIPES } from './riceCooker';
+import { COMPONENT_RECIPES } from './components';
 
 // Systematic batch recipes to complete full home cooking coverage
 const BULK_ADDITIONAL_RECIPES: Recipe[] = [
@@ -624,9 +626,11 @@ const RAW_ALL_RECIPES: Recipe[] = [
   ...ADDITIONAL_RECIPES,
   ...COMPREHENSIVE_RECIPES,
   ...BULK_ADDITIONAL_RECIPES,
+  ...RICE_COOKER_RECIPES,
+  ...COMPONENT_RECIPES,
 ];
 
-// Deduplicate by ID and ensure seasonings field completeness
+// Deduplicate by ID and ensure seasonings & lazy cooking fields completeness
 const idSet = new Set<string>();
 export const ALL_RECIPES: Recipe[] = RAW_ALL_RECIPES
   .filter(r => {
@@ -642,9 +646,45 @@ export const ALL_RECIPES: Recipe[] = RAW_ALL_RECIPES
       : r.ingredients
           .filter(i => i.category === '调料辅料')
           .map(i => `${i.name} ${i.amount}${i.unit}`);
+
+    const isRiceCooker = r.equipment?.some(eq => eq.includes('rice-cooker') || eq.includes('电饭煲')) || r.tags.includes('电饭煲');
+    const isOnePot = r.onePot ?? (isRiceCooker || r.tags.includes('一锅出') || r.tags.includes('一锅搞定') || r.tags.includes('免开火'));
+    const isHandsOff = r.handsOff ?? (isRiceCooker || r.tags.includes('免看火') || r.cookingMethod === '炖' || r.cookingMethod === '蒸');
+
+    // Strict complete meal calculation: Must contain Protein + Vegetable + Staple in one dish
+    const hasProt = (r.proteinSource && r.proteinSource !== 'none') ||
+      r.protein >= 15 ||
+      Boolean(r.ingredients?.some(i => i.category === '肉禽蛋' || i.category === '豆制品水产'));
+    const hasVeg = r.category === 'vegetable' ||
+      Boolean(r.ingredients?.some(i => i.category === '蔬菜菌菇'));
+    const hasStaple = r.category === 'staple' ||
+      Boolean(r.tags?.some(t => ['焖饭', '炒饭', '盖饭', '炒面', '汤面', '拌面'].includes(t))) ||
+      Boolean(['焖饭', '炒饭', '盖饭', '炒面', '汤面', '拌面', '乌冬'].some(kw => r.name.includes(kw))) ||
+      Boolean(r.ingredients?.some(i => i.category === '粮谷主食' && !i.name.includes('淀粉') && !i.name.includes('生粉')));
+    const isPureStaple = r.category === 'staple' && (!r.proteinSource || r.proteinSource === 'none');
+
+    const isComplete = !isPureStaple && r.category !== 'soup' && hasProt && hasVeg && hasStaple;
+
+    const activeTime = r.activeTimeMinutes ?? (
+      isRiceCooker ? Math.min(8, r.prepTimeMinutes || 6) : (r.prepTimeMinutes || Math.max(3, Math.round(r.timeMinutes * 0.4)))
+    );
+    const passiveTime = r.passiveTimeMinutes ?? (
+      isRiceCooker ? (r.timeMinutes - activeTime) : (r.cookTimeMinutes || Math.max(2, r.timeMinutes - activeTime))
+    );
+    const totalTime = r.totalTimeMinutes ?? r.timeMinutes ?? (activeTime + passiveTime);
+
     return {
       ...r,
       seasonings: seasonings.length > 0 ? seasonings : ['食用油 5克', '食盐 2克'],
+      equipment: isRiceCooker ? Array.from(new Set([...(r.equipment || []), 'rice-cooker', '电饭煲'])) : (r.equipment || ['炒锅']),
+      onePot: isOnePot,
+      handsOff: isHandsOff,
+      prepComplexity: r.prepComplexity || (activeTime <= 8 ? 'low' : activeTime <= 15 ? 'medium' : 'high'),
+      cookwareCount: r.cookwareCount ?? (isOnePot ? 1 : 2),
+      activeTimeMinutes: activeTime,
+      passiveTimeMinutes: passiveTime,
+      totalTimeMinutes: totalTime,
+      isCompleteMeal: isComplete,
     };
   });
 

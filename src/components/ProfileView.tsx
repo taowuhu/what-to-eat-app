@@ -416,7 +416,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           <button
             type="submit"
             id="btn-save-profile"
-            className="w-full py-3.5 px-4 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 shadow-md shadow-orange-600/25 active:scale-98 transition flex items-center justify-center gap-2"
+            className="w-full py-3.5 px-4 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 shadow-md shadow-orange-600/25 active:scale-98 transition flex items-center justify-center gap-2 cursor-pointer"
           >
             <Save className="w-4 h-4" />
             <span>保存身体数据与目标</span>

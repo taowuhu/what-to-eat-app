@@ -164,23 +164,39 @@ export const HomeHeroDecision: React.FC<HomeHeroDecisionProps> = ({
                 <Utensils className="w-4.5 h-4.5" />
               </div>
               <span className="text-[11px] font-medium bg-black/10 text-white/95 px-2 py-0.5 rounded-full">
-                即选即做
+                {selectedFilters.includes('lazy_mode')
+                  ? '懒人模式'
+                  : selectedFilters.includes('single_person')
+                  ? '一人食省心'
+                  : '即选即做'}
               </span>
             </div>
 
             <h3 className="text-base font-black text-white tracking-tight">
-              帮我选一顿
+              {selectedFilters.includes('lazy_mode') ? '今天就懒一下' : '帮我选一顿'}
             </h3>
             <p className="text-xs text-white/90 mt-1 font-medium">
-              现在就解决这一餐
+              {selectedFilters.includes('lazy_mode')
+                ? '动手几分钟 · 剩下交给电饭煲'
+                : selectedFilters.includes('single_person')
+                ? '少切配少洗碗 · 一碗搞定'
+                : '现在就解决这一餐'}
             </p>
             <p className="text-[11px] text-white/75 mt-0.5">
-              适合临时决定早餐、午餐或晚餐
+              {selectedFilters.includes('lazy_mode')
+                ? '免看火少洗锅 · 下班回家直接吃'
+                : '适合临时决定早餐、午餐或晚餐'}
             </p>
           </div>
 
           <div className="mt-3 pt-2 border-t border-white/20 flex items-center justify-between text-xs text-white/95 font-semibold">
-            <span>主菜 + 时蔬 + 主食</span>
+            <span>
+              {selectedFilters.includes('lazy_mode')
+                ? '电饭煲一锅出 / 懒人单锅'
+                : selectedFilters.includes('single_person')
+                ? '极简一人食 · 一碗/一盘搞定'
+                : '主菜 + 时蔬 + 主食'}
+            </span>
             <div className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center group-hover:translate-x-0.5 transition-transform">
               <ArrowRight className="w-3 h-3 text-white" />
             </div>

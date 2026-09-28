@@ -65,6 +65,7 @@ export type ProteinSource =
   | 'shrimp'
   | 'egg'
   | 'tofu'
+  | 'dairy'
   | 'none';
 
 export type CookingMethod = '炒' | '蒸' | '炖' | '煎' | '煮' | '凉拌' | '烤' | '冲调' | '烧';
@@ -104,6 +105,8 @@ export type RecipeCategory = 'main' | 'vegetable' | 'staple' | 'soup' | 'breakfa
 
 export type RecipeDifficulty = '小白友好' | '新手快手' | '进阶家常';
 
+export type MealComplexity = 'simple' | 'standard' | 'rich';
+
 export interface Recipe {
   id: string;
   name: string;
@@ -128,6 +131,16 @@ export interface Recipe {
   imageUrl: string;
   image?: string;
   dislikeTags: string[]; // for exclusion (e.g. '牛肉', '香菜', '辛辣', '虾', '海鲜', '猪肉')
+
+  // V0.4.6 Lazy Cooking & Complexity extensions
+  onePot?: boolean;
+  handsOff?: boolean;
+  prepComplexity?: 'low' | 'medium' | 'high';
+  cookwareCount?: number;
+  activeTimeMinutes?: number;
+  passiveTimeMinutes?: number;
+  totalTimeMinutes?: number;
+  isCompleteMeal?: boolean; // 自身即可作为一顿完整的一人食正餐 (包含蛋白质+蔬菜+主食)
 
   // Backwards compatibility aliases
   calories: number;
@@ -178,6 +191,69 @@ export interface MealCombo {
   tags: string[];
   recommendationReason: string;
   pantryCoverage?: PantryCoverageInfo;
+
+  // V0.4.6 Meal Complexity & Lazy Cooking fields
+  complexity?: MealComplexity;
+  activeTimeMinutes?: number;
+  passiveTimeMinutes?: number;
+  totalTimeMinutes?: number;
+  isLazy?: boolean;
+  cookwareCount?: number;
+
+  // V0.4.7 Meal Nutrition Guardrails
+  nutritionValidation?: MealNutritionValidationResult;
+}
+
+export interface MacroRange {
+  min: number;
+  preferred: number;
+  max: number;
+}
+
+export interface MealMacroTarget {
+  mealType: MealType;
+  targetCalories: number;
+  targetProtein: number;
+  targetCarbs: number;
+  targetFat: number;
+  calorieRange: [number, number];
+  proteinRange: [number, number];
+  carbRange: [number, number];
+  fatRange: [number, number];
+  // V0.4.7.1 Structured 3-point range (targetMin, targetPreferred, targetMax)
+  calories: MacroRange;
+  protein: MacroRange;
+  carbs: MacroRange;
+  fat: MacroRange;
+}
+
+export interface MealNutritionValidationResult {
+  hasProteinSource: boolean;
+  hasCarbSource: boolean;
+  hasFatSource: boolean;
+  hasVegetableOrFruit: boolean;
+  proteinAmount: number;
+  carbAmount: number;
+  fatAmount: number;
+  calories: number;
+  targetFitScore: number;
+  isComplete: boolean; // Layer 1: Structural Completeness
+  isAdequate?: boolean; // Layer 2: Macro Adequacy
+  targetRanges?: {
+    calories: MacroRange;
+    protein: MacroRange;
+    carbs: MacroRange;
+    fat: MacroRange;
+  };
+  macroAdequacy?: {
+    proteinStatus: 'low' | 'adequate' | 'high';
+    carbsStatus: 'low' | 'adequate' | 'high';
+    fatStatus: 'low' | 'adequate' | 'high';
+    calorieStatus: 'low' | 'adequate' | 'high';
+    carbStackCount?: number;
+    mealTarget?: MealMacroTarget;
+  };
+  issues: string[];
 }
 
 export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
@@ -208,7 +284,7 @@ export interface DailyLog {
   records: MealRecord[];
 }
 
-export type QuickFilterId = '15min' | 'single_person' | 'high_protein' | 'homestyle' | 'budget_friendly';
+export type QuickFilterId = '15min' | 'single_person' | 'high_protein' | 'lazy_mode' | 'homestyle' | 'budget_friendly';
 
 export interface QuickFilterOption {
   id: QuickFilterId;
@@ -229,6 +305,7 @@ export interface DayMealSlot {
   carbs: number;
   fat: number;
   difficulty?: '小白友好' | '新手快手' | '进阶家常';
+  nutritionValidation?: MealNutritionValidationResult;
 }
 
 export interface DayMealPlan {
@@ -248,6 +325,27 @@ export interface DayMealPlan {
     missingCount: number;
     matchedCount: number;
     totalCount: number;
+  };
+  dayAudit?: {
+    targetFitRate: number;
+    isBalanced: boolean;
+    targetCalories: number;
+    targetProtein: number;
+    targetCarbs: number;
+    targetFat: number;
+    proteinDistribution: { breakfast: number; lunch: number; dinner: number };
+    // V0.4.7.2 Day Plan statistical distribution
+    macroDeviations?: {
+      calories: { average: number; median: number; min: number; max: number; unit: string };
+      protein: { average: number; median: number; min: number; max: number; unit: string };
+      carbs: { average: number; median: number; min: number; max: number; unit: string };
+      fat: { average: number; median: number; min: number; max: number; unit: string };
+    };
+    fitRateStats?: {
+      slotsTotal: number;
+      slotsWithinRange: number;
+      summaryText: string;
+    };
   };
 }
 

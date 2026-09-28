@@ -1,5 +1,5 @@
 import React from 'react';
-import { Timer, Flame, User, Utensils } from 'lucide-react';
+import { Timer, Flame, User, Utensils, Sparkles } from 'lucide-react';
 import { QuickFilterId } from '../types';
 import { QUICK_FILTERS } from '../data/defaultProfile';
 
@@ -20,6 +20,8 @@ export const QuickFilterBar: React.FC<QuickFilterBarProps> = ({
         return <User className="w-3.5 h-3.5" />;
       case 'high_protein':
         return <Flame className="w-3.5 h-3.5" />;
+      case 'lazy_mode':
+        return <Sparkles className="w-3.5 h-3.5" />;
       case 'homestyle':
         return <Utensils className="w-3.5 h-3.5" />;
       default:

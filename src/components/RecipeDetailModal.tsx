@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { X, ChefHat, Sparkles, ArrowRight, ShoppingCart, Star } from 'lucide-react';
 import { Recipe } from '../types';
-import { scaleRecipe } from '../utils/servingsScaler';
+import { scaleRecipeForServings } from '../utils/servingsScaler';
 import { ServingsSegment } from './ServingsSegment';
 
 interface RecipeDetailModalProps {
@@ -34,7 +34,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
 
   const scaledRecipe = useMemo(() => {
     if (!recipe) return null;
-    return scaleRecipe(recipe, servings);
+    return scaleRecipeForServings(recipe, servings);
   }, [recipe, servings]);
 
   if (!isOpen || !recipe || !scaledRecipe) return null;
@@ -86,13 +86,25 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
           </div>
 
           <div className="absolute bottom-3 left-4 right-4 text-white">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-1.5 mb-1 flex-wrap">
               <span className="bg-orange-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
                 {recipe.difficulty}
               </span>
-              <span className="bg-white/20 backdrop-blur-xs text-[10px] font-medium px-2 py-0.5 rounded-full text-white">
-                约 {recipe.cookTimeMinutes} 分钟
-              </span>
+              {recipe.equipment?.some(eq => eq.includes('rice-cooker') || eq.includes('电饭煲')) && (
+                <span className="bg-amber-400 text-stone-950 text-[10px] font-black px-2 py-0.5 rounded-full">
+                  电饭煲一锅出
+                </span>
+              )}
+              {recipe.handsOff && (
+                <span className="bg-emerald-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  免看火
+                </span>
+              )}
+              {recipe.onePot && (
+                <span className="bg-orange-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  少洗锅
+                </span>
+              )}
               {servings > 1 && (
                 <span className="bg-amber-500/90 text-stone-950 text-[10px] font-black px-2 py-0.5 rounded-full">
                   已按 {servings}人份 换算
@@ -107,6 +119,30 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
 
         {/* Scrollable Body */}
         <div className="overflow-y-auto p-4 space-y-4 flex-1">
+          {/* 耗时与锅具透明卡片 (V0.4.6: 诚实区分动手 vs 等待) */}
+          <div className="bg-white rounded-2xl p-3.5 border border-stone-200/90 shadow-2xs">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="bg-[#FAF7F2] py-2 px-1 rounded-xl border border-stone-200/60">
+                <span className="text-[10px] text-stone-400 block mb-0.5">动手切配</span>
+                <span className="text-xs font-black text-orange-700">
+                  {recipe.activeTimeMinutes || 6} 分钟
+                </span>
+              </div>
+              <div className="bg-[#FAF7F2] py-2 px-1 rounded-xl border border-stone-200/60">
+                <span className="text-[10px] text-stone-400 block mb-0.5">等待焖煮</span>
+                <span className="text-xs font-bold text-stone-700">
+                  {recipe.passiveTimeMinutes || Math.max(10, recipe.cookTimeMinutes)} 分钟
+                </span>
+              </div>
+              <div className="bg-[#FAF7F2] py-2 px-1 rounded-xl border border-stone-200/60">
+                <span className="text-[10px] text-stone-400 block mb-0.5">需要锅具</span>
+                <span className="text-xs font-bold text-stone-800">
+                  {recipe.equipment?.some(eq => eq.includes('rice-cooker') || eq.includes('电饭煲')) ? '电饭煲 (1个)' : `${recipe.cookwareCount || 1}个锅`}
+                </span>
+              </div>
+            </div>
+          </div>
+
           {/* 第一优先续：菜品风味特色与介绍 */}
           <div className="bg-white rounded-2xl p-4 border border-stone-200/90 shadow-2xs">
             <div className="flex items-center gap-1.5 text-xs font-bold text-stone-800 mb-1">
@@ -127,7 +163,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
           </div>
 
           {/* ============================================================ */}
-          {/* 第二优先：需要买什么 (精准食材与克数清单，已按份量缩放) */}
+          {/* 第二优先：需要买什么 (食材与参考克数清单，已按份量缩放) */}
           {/* ============================================================ */}
           <div className="bg-white rounded-2xl p-4 border border-stone-200/90 shadow-2xs">
             <div className="flex items-center justify-between mb-3">
@@ -138,7 +174,7 @@ export const RecipeDetailModal: React.FC<RecipeDetailModalProps> = ({
                 </h3>
               </div>
               <span className="text-[11px] text-orange-600 font-semibold bg-orange-50 px-2 py-0.5 rounded border border-orange-200/60">
-                {servings > 1 ? `${servings}人量精确换算` : '新手精准称重'}
+                {servings > 1 ? `${servings}人量用量估算` : '新手用量参考'}
               </span>
             </div>
 

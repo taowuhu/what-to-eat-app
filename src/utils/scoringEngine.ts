@@ -163,9 +163,60 @@ export function calculateRecipeScore(recipe: Recipe, context: ScoringContext = {
   }
 
   // 7. Active Quick Filters
-  if (activeFilters.includes('15min')) {
-    if (recipe.cookTimeMinutes <= 15 || recipe.tags.includes('15分钟')) {
+  if (activeFilters.includes('lazy_mode')) {
+    const isRiceCooker = recipe.equipment?.some(eq => eq.includes('rice-cooker') || eq.includes('电饭煲')) || recipe.tags.includes('电饭煲');
+    const isOnePot = recipe.onePot || recipe.tags.includes('一锅出') || recipe.tags.includes('一锅搞定');
+    const isHandsOff = recipe.handsOff || recipe.tags.includes('免看火');
+    const activeTime = recipe.activeTimeMinutes ?? (recipe.prepTimeMinutes || 8);
+    const cookwares = recipe.cookwareCount ?? (isOnePot ? 1 : 2);
+    const stepsCount = recipe.steps?.length || 4;
+
+    // Heavily boost hands-off, rice cooker, one-pot recipes
+    if (isRiceCooker) {
+      score *= 2.2;
+    }
+    if (isOnePot) {
+      score *= 1.6;
+    }
+    if (isHandsOff) {
+      score *= 1.5;
+    }
+    if (activeTime <= 8) {
       score *= 1.4;
+    } else if (activeTime <= 12) {
+      score *= 1.15;
+    } else if (activeTime > 18) {
+      score *= 0.4;
+    }
+
+    if (cookwares <= 1) {
+      score *= 1.35;
+    } else if (cookwares > 1) {
+      score *= 0.45;
+    }
+
+    if (recipe.prepComplexity === 'low') {
+      score *= 1.25;
+    } else if (recipe.prepComplexity === 'high') {
+      score *= 0.4;
+    }
+
+    if (stepsCount <= 4) {
+      score *= 1.2;
+    } else if (stepsCount >= 6) {
+      score *= 0.6;
+    }
+
+    // Penalize dishes that require continuous active stir-frying in lazy mode
+    if (recipe.cookingMethod === '炒' || recipe.tags.includes('爆炒')) {
+      score *= 0.75;
+    }
+  }
+
+  if (activeFilters.includes('15min')) {
+    const totalTime = recipe.totalTimeMinutes ?? recipe.timeMinutes ?? (recipe.cookTimeMinutes + recipe.prepTimeMinutes);
+    if (totalTime <= 15 || recipe.tags.includes('15分钟')) {
+      score *= 1.5;
     } else {
       score *= 0.5;
     }
@@ -173,11 +224,15 @@ export function calculateRecipeScore(recipe: Recipe, context: ScoringContext = {
   if (activeFilters.includes('high_protein')) {
     score += recipe.protein * 2.5;
   }
+  if (activeFilters.includes('single_person')) {
+    if (recipe.isCompleteMeal || recipe.tags.includes('一人食') || recipe.tags.includes('一锅搞定')) {
+      score *= 1.6;
+    } else if (recipe.category === 'main') {
+      score *= 1.2;
+    }
+  }
   if (activeFilters.includes('homestyle') && recipe.tags.includes('家常菜')) {
     score *= 1.25;
-  }
-  if (activeFilters.includes('single_person') && (recipe.tags.includes('一人食') || recipe.category === 'main')) {
-    score *= 1.2;
   }
 
   // 8. Recent History Deduplication (近期已食用/已安排防连续重复)

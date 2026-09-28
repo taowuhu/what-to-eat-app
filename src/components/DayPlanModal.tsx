@@ -18,7 +18,8 @@ import {
 } from 'lucide-react';
 import { DayMealPlan, DayMealSlot, MealType, Recipe, GroceryCategory } from '../types';
 import { buildDayGroceryList } from '../utils/dayPlanGenerator';
-import { scaleRecipe } from '../utils/servingsScaler';
+import { scaleRecipeForServings } from '../utils/servingsScaler';
+import { auditMealPantryCoverage } from '../utils/ingredientMatcher';
 import { ServingsSegment } from './ServingsSegment';
 
 interface DayPlanModalProps {
@@ -33,6 +34,8 @@ interface DayPlanModalProps {
   defaultServings?: number;
   favoriteRecipeIds?: string[];
   onToggleFavorite?: (recipeId: string) => void;
+  pantryIngredientIds?: string[];
+  clearFridgeMode?: boolean;
 }
 
 export const DayPlanModal: React.FC<DayPlanModalProps> = ({
@@ -47,6 +50,8 @@ export const DayPlanModal: React.FC<DayPlanModalProps> = ({
   defaultServings = 1,
   favoriteRecipeIds = [],
   onToggleFavorite,
+  pantryIngredientIds = [],
+  clearFridgeMode = false,
 }) => {
   const [servings, setServings] = useState<number>(defaultServings);
   const [showGroceries, setShowGroceries] = useState(false);
@@ -55,12 +60,18 @@ export const DayPlanModal: React.FC<DayPlanModalProps> = ({
   const [filterMissingOnly, setFilterMissingOnly] = useState(false);
   const [copiedMissing, setCopiedMissing] = useState(false);
 
-  // Scaled meal plan based on current servings
+  React.useEffect(() => {
+    if (isOpen) {
+      setServings(defaultServings);
+    }
+  }, [isOpen, defaultServings]);
+
+  // Scaled meal plan based on current servings (single source of truth)
   const scaledPlan = useMemo(() => {
     if (!plan) return null;
 
     const scaleSlot = (slot: DayMealSlot): DayMealSlot => {
-      const scaledRecipes = slot.recipes.map(r => scaleRecipe(r, servings));
+      const scaledRecipes = slot.recipes.map(r => scaleRecipeForServings(r, servings));
       const calories = scaledRecipes.reduce((sum, r) => sum + r.calories, 0);
       const protein = Math.round(scaledRecipes.reduce((sum, r) => sum + r.protein, 0) * 10) / 10;
       const carbs = Math.round(scaledRecipes.reduce((sum, r) => sum + r.carbs, 0) * 10) / 10;
@@ -84,6 +95,22 @@ export const DayPlanModal: React.FC<DayPlanModalProps> = ({
     const totalCarbs = Math.round((scaledBreakfast.carbs + scaledLunch.carbs + scaledDinner.carbs) * 10) / 10;
     const totalFat = Math.round((scaledBreakfast.fat + scaledLunch.fat + scaledDinner.fat) * 10) / 10;
 
+    let scaledPantryCoverage = plan.pantryCoverage;
+    if (pantryIngredientIds && pantryIngredientIds.length > 0) {
+      const allScaledRecipes = [
+        ...scaledBreakfast.recipes,
+        ...scaledLunch.recipes,
+        ...scaledDinner.recipes,
+      ];
+      const audit = auditMealPantryCoverage(allScaledRecipes, pantryIngredientIds, clearFridgeMode);
+      scaledPantryCoverage = {
+        coveragePercent: Math.round(audit.coverageRate * 100),
+        missingCount: audit.missingCount,
+        matchedCount: audit.matchedCount,
+        totalCount: audit.totalCount,
+      };
+    }
+
     return {
       ...plan,
       breakfast: scaledBreakfast,
@@ -93,12 +120,19 @@ export const DayPlanModal: React.FC<DayPlanModalProps> = ({
       totalProtein,
       totalCarbs,
       totalFat,
+      pantryCoverage: scaledPantryCoverage,
     };
-  }, [plan, servings]);
+  }, [plan, servings, pantryIngredientIds, clearFridgeMode]);
+
+  const groupedGroceries = useMemo(() => {
+    if (!scaledPlan) {
+      return { '肉蛋奶': [], '蔬菜': [], '主食': [], '调味料': [] } as Record<GroceryCategory, any[]>;
+    }
+    return buildDayGroceryList(scaledPlan, pantryIngredientIds);
+  }, [scaledPlan, pantryIngredientIds]);
 
   if (!isOpen || !plan || !scaledPlan) return null;
 
-  const groupedGroceries = buildDayGroceryList(scaledPlan);
   const groceryCategories: GroceryCategory[] = ['肉蛋奶', '蔬菜', '主食', '调味料'];
   const pantryCoverage = scaledPlan.pantryCoverage;
 
@@ -194,27 +228,41 @@ export const DayPlanModal: React.FC<DayPlanModalProps> = ({
             </div>
 
             {showNutritionDetails && (
-              <div className="mt-3 pt-3 border-t border-stone-100 grid grid-cols-4 gap-2 text-center text-xs animate-in fade-in duration-150">
-                <div className="bg-stone-50 p-2 rounded-xl border border-stone-200/50">
-                  <div className="text-[10px] text-stone-400 font-medium">全天热量</div>
-                  <div className="text-sm font-bold text-stone-800 mt-0.5 font-mono">{scaledPlan.totalCalories}</div>
-                  <div className="text-[9px] text-stone-400">kcal</div>
+              <div className="mt-3 pt-3 border-t border-stone-100 space-y-2.5 animate-in fade-in duration-150">
+                <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                  <div className="bg-stone-50 p-2 rounded-xl border border-stone-200/50">
+                    <div className="text-[10px] text-stone-400 font-medium">全天热量估算</div>
+                    <div className="text-sm font-bold text-stone-800 mt-0.5 font-mono">{scaledPlan.totalCalories}</div>
+                    <div className="text-[9px] text-stone-400">kcal</div>
+                  </div>
+                  <div className="bg-stone-50 p-2 rounded-xl border border-stone-200/50">
+                    <div className="text-[10px] text-stone-400 font-medium">蛋白质估算</div>
+                    <div className="text-sm font-bold text-stone-800 mt-0.5 font-mono">{scaledPlan.totalProtein}g</div>
+                    <div className="text-[9px] text-emerald-600">充足</div>
+                  </div>
+                  <div className="bg-stone-50 p-2 rounded-xl border border-stone-200/50">
+                    <div className="text-[10px] text-stone-400 font-medium">碳水化合物</div>
+                    <div className="text-sm font-bold text-stone-800 mt-0.5 font-mono">{scaledPlan.totalCarbs}g</div>
+                    <div className="text-[9px] text-stone-400">适中</div>
+                  </div>
+                  <div className="bg-stone-50 p-2 rounded-xl border border-stone-200/50">
+                    <div className="text-[10px] text-stone-400 font-medium">脂肪</div>
+                    <div className="text-sm font-bold text-stone-800 mt-0.5 font-mono">{scaledPlan.totalFat}g</div>
+                    <div className="text-[9px] text-stone-400">清淡少油</div>
+                  </div>
                 </div>
-                <div className="bg-stone-50 p-2 rounded-xl border border-stone-200/50">
-                  <div className="text-[10px] text-stone-400 font-medium">蛋白质</div>
-                  <div className="text-sm font-bold text-stone-800 mt-0.5 font-mono">{scaledPlan.totalProtein}g</div>
-                  <div className="text-[9px] text-emerald-600">充足</div>
-                </div>
-                <div className="bg-stone-50 p-2 rounded-xl border border-stone-200/50">
-                  <div className="text-[10px] text-stone-400 font-medium">碳水化合物</div>
-                  <div className="text-sm font-bold text-stone-800 mt-0.5 font-mono">{scaledPlan.totalCarbs}g</div>
-                  <div className="text-[9px] text-stone-400">适中</div>
-                </div>
-                <div className="bg-stone-50 p-2 rounded-xl border border-stone-200/50">
-                  <div className="text-[10px] text-stone-400 font-medium">脂肪</div>
-                  <div className="text-sm font-bold text-stone-800 mt-0.5 font-mono">{scaledPlan.totalFat}g</div>
-                  <div className="text-[9px] text-stone-400">清淡少油</div>
-                </div>
+
+                {scaledPlan.dayAudit && (
+                  <div className="bg-stone-50/80 rounded-xl p-2.5 border border-stone-200/50 text-[10px] text-stone-500 space-y-1">
+                    <div className="flex items-center justify-between text-stone-600 font-medium">
+                      <span>个性化目标适配度</span>
+                      <span className="text-emerald-600 font-bold">{scaledPlan.dayAudit.targetFitRate}%</span>
+                    </div>
+                    <div className="text-stone-400 text-[9px] leading-relaxed">
+                      * 营养数据基于中国食物成分表换算之摄入参考估算值，实际摄入随烹饪吸油与食材产地自然波动。
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -301,6 +349,20 @@ export const DayPlanModal: React.FC<DayPlanModalProps> = ({
                     <h3 className="text-sm font-bold text-stone-900 leading-snug">
                       {slot.title}
                     </h3>
+                    <div className="flex items-center gap-2.5 text-[11px] text-stone-500 mt-1">
+                      <span>约 {slot.calories} kcal</span>
+                      <span>·</span>
+                      <span>
+                        蛋白 <strong className="font-semibold text-stone-700">{slot.protein}g</strong>
+                        {slot.nutritionValidation?.targetRanges?.protein && (
+                          <span className="text-stone-400 text-[10px] ml-1">
+                            (目标 {slot.nutritionValidation.targetRanges.protein.min}~{slot.nutritionValidation.targetRanges.protein.max}g)
+                          </span>
+                        )}
+                      </span>
+                      <span>·</span>
+                      <span>碳水 {slot.carbs}g</span>
+                    </div>
                   </div>
 
                   {/* Dishes breakdown + Cook mode button */}

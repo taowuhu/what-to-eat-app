@@ -1,4 +1,5 @@
 import { Ingredient, Recipe, GroupedGroceryItem, MacroNutrients } from '../types';
+import { getRecipeById } from '../data/recipes';
 
 /**
  * Seasoning scaling factor lookup to prevent over-seasoning when scaling up portions.
@@ -12,8 +13,8 @@ export const SEASONING_SCALE_FACTORS: Record<number, number> = {
 };
 
 export function getSeasoningScaleFactor(targetServings: number, baseServings: number = 1): number {
-  const target = Math.max(1, Math.min(4, targetServings));
-  const base = Math.max(1, Math.min(4, baseServings));
+  const target = Math.max(1, Math.min(4, Math.round(targetServings)));
+  const base = Math.max(1, Math.min(4, Math.round(baseServings)));
   if (target === base) return 1.0;
   const targetFactor = SEASONING_SCALE_FACTORS[target] || Math.pow(target, 0.75);
   const baseFactor = SEASONING_SCALE_FACTORS[base] || Math.pow(base, 0.75);
@@ -100,25 +101,31 @@ const CALORIC_SEASONING_KEYWORDS: {
  *   while non-caloric/low-caloric seasonings (salt, spices) contribute 0 calories.
  */
 export function calculateRecipeNutrition(recipe: Recipe, targetServings: number): MacroNutrients {
-  const baseServings = recipe.servings || 1;
-  if (targetServings === baseServings) {
+  // Always derive from original unscaled base recipe to prevent cumulative drift
+  const baseRecipe: Recipe = (recipe as any)._baseRecipe
+    || (recipe.id ? getRecipeById(recipe.id) : undefined)
+    || recipe;
+  const baseServings = Math.max(1, Math.min(4, Math.round(baseRecipe.servings || 1)));
+  const target = Math.max(1, Math.min(4, Math.round(targetServings)));
+
+  if (target === baseServings) {
     return {
-      calories: recipe.calories,
-      protein: recipe.protein,
-      carbs: recipe.carbs,
-      fat: recipe.fat,
+      calories: baseRecipe.calories,
+      protein: baseRecipe.protein,
+      carbs: baseRecipe.carbs,
+      fat: baseRecipe.fat,
     };
   }
 
-  const mainFactor = getMainIngredientScaleFactor(targetServings, baseServings);
-  const seasFactor = getSeasoningScaleFactor(targetServings, baseServings);
+  const mainFactor = getMainIngredientScaleFactor(target, baseServings);
+  const seasFactor = getSeasoningScaleFactor(target, baseServings);
 
   // Check if recipe has caloric seasonings
   let hasCaloricSeasoning = false;
   let hasOil = false;
   let totalCaloricSeasGrams = 0;
 
-  for (const ing of recipe.ingredients) {
+  for (const ing of baseRecipe.ingredients) {
     if (ing.category === '调料辅料') {
       const g = ing.grams !== undefined ? ing.grams : (ing.unit.includes('克') ? ing.amount : ing.amount * 5);
       for (const item of CALORIC_SEASONING_KEYWORDS) {
@@ -135,10 +142,10 @@ export function calculateRecipeNutrition(recipe: Recipe, targetServings: number)
   if (!hasCaloricSeasoning) {
     // Pure main ingredient dish (e.g. boiled sweet potato, steamed rice, milk oats)
     return {
-      calories: Math.round(recipe.calories * mainFactor),
-      protein: Math.round(recipe.protein * mainFactor * 10) / 10,
-      carbs: Math.round(recipe.carbs * mainFactor * 10) / 10,
-      fat: Math.round(recipe.fat * mainFactor * 10) / 10,
+      calories: Math.round(baseRecipe.calories * mainFactor),
+      protein: Math.round(baseRecipe.protein * mainFactor * 10) / 10,
+      carbs: Math.round(baseRecipe.carbs * mainFactor * 10) / 10,
+      fat: Math.round(baseRecipe.fat * mainFactor * 10) / 10,
     };
   }
 
@@ -162,33 +169,54 @@ export function calculateRecipeNutrition(recipe: Recipe, targetServings: number)
     : mainFactor;
 
   return {
-    calories: Math.round(recipe.calories * effectiveCalorieFactor),
-    protein: Math.round(recipe.protein * effectiveProteinFactor * 10) / 10,
-    carbs: Math.round(recipe.carbs * effectiveCarbFactor * 10) / 10,
-    fat: Math.round(recipe.fat * effectiveFatFactor * 10) / 10,
+    calories: Math.round(baseRecipe.calories * effectiveCalorieFactor),
+    protein: Math.round(baseRecipe.protein * effectiveProteinFactor * 10) / 10,
+    carbs: Math.round(baseRecipe.carbs * effectiveCarbFactor * 10) / 10,
+    fat: Math.round(baseRecipe.fat * effectiveFatFactor * 10) / 10,
   };
 }
 
-/**
- * Returns a cloned recipe with ingredients and nutrition scaled for target servings.
- * Crucial: Does NOT modify the original recipe data.
- */
-export function scaleRecipe(recipe: Recipe, targetServings: number): Recipe {
-  const baseServings = recipe.servings || 1;
-  if (targetServings === baseServings) {
-    return recipe;
-  }
+export interface ScaledRecipeResult extends Recipe {
+  scaledIngredients: Ingredient[];
+  scaledSeasonings: Ingredient[];
+  scaledNutrition: MacroNutrients;
+  baseRecipe: Recipe;
+  _baseRecipe?: Recipe;
+}
 
-  const scaledIngredients = recipe.ingredients.map(ing =>
-    scaleIngredient(ing, targetServings, baseServings)
+/**
+ * Single source of truth for servings scaling:
+ * Always derives from the unscaled base recipe to prevent cumulative multiplier drift.
+ * Returns scaled ingredients, scaled seasonings, scaled nutrition, and attached base recipe.
+ */
+export function scaleRecipeForServings(recipe: Recipe, targetServings: number): ScaledRecipeResult {
+  const target = Math.max(1, Math.min(4, Math.round(targetServings)));
+
+  // Always locate the unscaled base recipe
+  const baseRecipe: Recipe = (recipe as any)._baseRecipe
+    || (recipe.id ? getRecipeById(recipe.id) : undefined)
+    || recipe;
+
+  const baseServings = Math.max(1, Math.min(4, Math.round(baseRecipe.servings || 1)));
+
+  // Scale every ingredient starting from baseRecipe.ingredients
+  const scaledIngredients = baseRecipe.ingredients.map(ing =>
+    scaleIngredient(ing, target, baseServings)
   );
 
-  const scaledNutrition = calculateRecipeNutrition(recipe, targetServings);
+  const scaledSeasonings = scaledIngredients.filter(i => i.category === '调料辅料');
+
+  const scaledNutrition = calculateRecipeNutrition(baseRecipe, target);
 
   return {
-    ...recipe,
-    servings: targetServings,
+    ...baseRecipe,
+    _baseRecipe: baseRecipe,
+    baseRecipe,
+    servings: target,
     ingredients: scaledIngredients,
+    scaledIngredients,
+    scaledSeasonings,
+    scaledNutrition,
     calories: scaledNutrition.calories,
     protein: scaledNutrition.protein,
     carbs: scaledNutrition.carbs,
@@ -201,6 +229,11 @@ export function scaleRecipe(recipe: Recipe, targetServings: number): Recipe {
     },
   };
 }
+
+/**
+ * Backward-compatible alias for scaleRecipeForServings
+ */
+export const scaleRecipe = scaleRecipeForServings;
 
 /**
  * Scales grocery list items proportionally according to target servings
@@ -222,5 +255,75 @@ export function scaleGroceryItems(
       amount: formatScaledAmount(item.amount * factor),
     };
   });
+}
+
+/**
+ * V0.4.7.1 Macro Adequacy Portion Tuning Helper.
+ * Adjusts ingredient portions within a recipe (e.g. more chicken in 焖饭, or more rice in staple)
+ * without mutating base recipes or breaking single-pot simplicity.
+ */
+export function tuneRecipeNutritionalPortions(
+  recipe: Recipe,
+  options: {
+    proteinMultiplier?: number;
+    carbMultiplier?: number;
+    fatMultiplier?: number;
+  }
+): Recipe {
+  const pMul = Math.max(0.5, Math.min(2.0, options.proteinMultiplier ?? 1.0));
+  const cMul = Math.max(0.5, Math.min(2.0, options.carbMultiplier ?? 1.0));
+  const fMul = Math.max(0.5, Math.min(2.0, options.fatMultiplier ?? 1.0));
+
+  if (pMul === 1.0 && cMul === 1.0 && fMul === 1.0) {
+    return recipe;
+  }
+
+  // Clone and scale ingredients by category
+  const updatedIngredients = recipe.ingredients.map(ing => {
+    let factor = 1.0;
+    if (ing.category === '肉禽蛋' || ing.category === '豆制品水产' || ing.category === '奶类坚果') {
+      factor = pMul;
+    } else if (ing.category === '粮谷主食') {
+      factor = cMul;
+    } else if (ing.category === '调料辅料' && (ing.name.includes('油') || ing.name.includes('芝麻') || ing.name.includes('花生酱'))) {
+      factor = fMul;
+    }
+
+    if (factor === 1.0) return ing;
+
+    const newAmount = formatScaledAmount(ing.amount * factor);
+    const newGrams = ing.grams !== undefined ? Math.round(ing.grams * factor) : undefined;
+    return {
+      ...ing,
+      amount: newAmount,
+      grams: newGrams,
+    };
+  });
+
+  // Calculate new macros proportionally
+  const baseP = recipe.protein || 0;
+  const baseC = recipe.carbs || 0;
+  const baseF = recipe.fat || 0;
+
+  // In recipes with multiple macros, scale only the relevant proportion
+  const newProtein = Math.max(1, Math.round(baseP * pMul * 10) / 10);
+  const newCarbs = Math.max(1, Math.round(baseC * cMul * 10) / 10);
+  const newFat = Math.max(0.5, Math.round(baseF * fMul * 10) / 10);
+  const newCalories = Math.round(newProtein * 4 + newCarbs * 4 + newFat * 9);
+
+  return {
+    ...recipe,
+    ingredients: updatedIngredients,
+    protein: newProtein,
+    carbs: newCarbs,
+    fat: newFat,
+    calories: newCalories,
+    nutritionEstimate: {
+      calories: newCalories,
+      protein: newProtein,
+      carbs: newCarbs,
+      fat: newFat,
+    },
+  };
 }
 

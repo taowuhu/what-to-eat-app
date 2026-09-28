@@ -1,5 +1,6 @@
 import { Ingredient, Recipe, MealCombo } from '../types';
 import { CANONICAL_INGREDIENTS, CANONICAL_ID_MAP, CanonicalIngredient } from '../data/canonicalIngredients';
+import { formatScaledAmount } from './servingsScaler';
 
 /**
  * Strips notes, punctuation, numbers, and prep instructions from ingredient names
@@ -151,13 +152,31 @@ export function auditMealPantryCoverage(
 
       const canon = findCanonicalIngredient(ing.name);
       if (canon) {
-        if (!seenCanonicalMap.has(canon.id)) {
-          seenCanonicalMap.set(canon.id, { ingredient: ing, canonical: canon });
+        const existing = seenCanonicalMap.get(canon.id);
+        if (existing) {
+          existing.ingredient = {
+            ...existing.ingredient,
+            amount: formatScaledAmount(existing.ingredient.amount + ing.amount),
+            grams: existing.ingredient.grams !== undefined || ing.grams !== undefined
+              ? (existing.ingredient.grams || existing.ingredient.amount) + (ing.grams || ing.amount)
+              : undefined,
+          };
+        } else {
+          seenCanonicalMap.set(canon.id, { ingredient: { ...ing }, canonical: canon });
         }
       } else {
         const clean = cleanIngredientName(ing.name);
-        if (!seenCanonicalMap.has(clean)) {
-          seenCanonicalMap.set(clean, { ingredient: ing, canonical: null });
+        const existing = seenCanonicalMap.get(clean);
+        if (existing) {
+          existing.ingredient = {
+            ...existing.ingredient,
+            amount: formatScaledAmount(existing.ingredient.amount + ing.amount),
+            grams: existing.ingredient.grams !== undefined || ing.grams !== undefined
+              ? (existing.ingredient.grams || existing.ingredient.amount) + (ing.grams || ing.amount)
+              : undefined,
+          };
+        } else {
+          seenCanonicalMap.set(clean, { ingredient: { ...ing }, canonical: null });
         }
       }
     }

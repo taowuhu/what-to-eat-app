@@ -21,8 +21,9 @@ import {
 } from 'lucide-react';
 import { MealCombo, Recipe, UserProfile, MacroNutrients, QuickFilterId, FeedbackSkipReason, PantryCoverageInfo } from '../types';
 import { generateAlternativeMeals } from '../utils/recommender';
-import { scaleRecipe, scaleGroceryItems } from '../utils/servingsScaler';
+import { scaleRecipe, scaleRecipeForServings } from '../utils/servingsScaler';
 import { auditMealPantryCoverage } from '../utils/ingredientMatcher';
+import { aggregateIngredients } from '../utils/dayPlanGenerator';
 import { ServingsSegment } from './ServingsSegment';
 import { RecommendationFeedbackModal } from './RecommendationFeedbackModal';
 
@@ -86,16 +87,16 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
     }
   }, [userProfile?.defaultServings]);
 
-  // Scaled combo for display and cooking
+  // Scaled combo for display and cooking (single source of truth for servings)
   const scaledCombo = useMemo(() => {
     if (!combo) return null;
-    const scaledRecipes = combo.recipes.map(r => scaleRecipe(r, servings));
+    const scaledRecipes = combo.recipes.map(r => scaleRecipeForServings(r, servings));
     const totalCalories = scaledRecipes.reduce((sum, r) => sum + r.calories, 0);
     const totalProtein = Math.round(scaledRecipes.reduce((sum, r) => sum + r.protein, 0) * 10) / 10;
     const totalCarbs = Math.round(scaledRecipes.reduce((sum, r) => sum + r.carbs, 0) * 10) / 10;
     const totalFat = Math.round(scaledRecipes.reduce((sum, r) => sum + r.fat, 0) * 10) / 10;
 
-    let updatedPantryCoverage = combo.pantryCoverage;
+    let updatedPantryCoverage: PantryCoverageInfo | undefined = undefined;
     if (pantryIngredientIds && pantryIngredientIds.length > 0) {
       const pantryAudit = auditMealPantryCoverage(scaledRecipes, pantryIngredientIds, clearFridgeMode);
       if (pantryAudit && pantryAudit.totalCount > 0) {
@@ -134,6 +135,12 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
     };
   }, [combo, servings, pantryIngredientIds, clearFridgeMode]);
 
+  // Scaled and merged grocery items for the current meal combo
+  const mergedMealGroceries = useMemo(() => {
+    if (!scaledCombo) return [];
+    return aggregateIngredients(scaledCombo.recipes, pantryIngredientIds);
+  }, [scaledCombo, pantryIngredientIds]);
+
   // Generate 3 diverse alternative meal options
   const fetchAlternatives = () => {
     if (!userProfile) return;
@@ -168,7 +175,13 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
 
   // Copy missing ingredients to clipboard (reflecting scaled servings)
   const handleCopyMissing = () => {
-    const missing = scaledCombo?.pantryCoverage?.missingIngredients || combo?.pantryCoverage?.missingIngredients;
+    let missing = scaledCombo?.pantryCoverage?.missingIngredients;
+    if (!missing || missing.length === 0) {
+      // If no pantry specified or coverage missing, use all non-seasoning groceries
+      missing = mergedMealGroceries
+        .filter(i => i.category !== '调味料' && !i.isInPantry)
+        .map(i => ({ name: i.name, amount: i.amount, unit: i.unit, category: i.category }));
+    }
     if (!missing?.length) return;
     const missingText = missing
       .map(i => `${i.name} ${i.amount}${i.unit}`)
@@ -183,7 +196,12 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
 
   // Add missing ingredients to grocery list (reflecting scaled servings)
   const handleAddToGrocery = () => {
-    const missing = scaledCombo?.pantryCoverage?.missingIngredients || combo?.pantryCoverage?.missingIngredients;
+    let missing = scaledCombo?.pantryCoverage?.missingIngredients;
+    if (!missing || missing.length === 0) {
+      missing = mergedMealGroceries
+        .filter(i => i.category !== '调味料' && !i.isInPantry)
+        .map(i => ({ name: i.name, amount: i.amount, unit: i.unit, category: i.category }));
+    }
     if (!missing?.length) return;
     if (onAddMissingToGrocery) {
       onAddMissingToGrocery(missing);
@@ -211,10 +229,17 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
         {/* Top Header */}
         <div className="p-4 bg-white border-b border-stone-200/80 flex items-center justify-between shrink-0">
           <div>
-            <h2 className="text-base font-bold text-stone-900 leading-tight">
-              今天就吃这个
+            <h2 className="text-base font-bold text-stone-900 leading-tight flex items-center gap-1.5">
+              {scaledCombo.isLazy && <Sparkles className="w-4 h-4 text-orange-500 fill-orange-400" />}
+              <span>{scaledCombo.isLazy ? '今天就懒一下' : '今天就吃这个'}</span>
             </h2>
-            <p className="text-[11px] text-stone-500">有荤有素有主食 · 家常好上手</p>
+            <p className="text-[11px] text-stone-500">
+              {scaledCombo.isLazy
+                ? `动手约 ${scaledCombo.activeTimeMinutes || 6} 分钟 · 剩下交给锅具 · 少洗锅`
+                : scaledCombo.complexity === 'simple'
+                ? '专为一人食精简 · 一碗满足少洗碗'
+                : '有荤有素有主食 · 家常好上手'}
+            </p>
           </div>
 
           <button
@@ -233,6 +258,19 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
               isShuffling ? 'scale-95 opacity-50 blur-xs' : 'scale-100 opacity-100'
             }`}
           >
+            {/* Lazy mode banner if hit */}
+            {scaledCombo.isLazy && (
+              <div className="mb-2.5 px-3 py-1.5 rounded-xl bg-orange-50/90 border border-orange-200/80 flex items-center justify-between text-xs text-orange-950 font-bold">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-orange-600" />
+                  <span>懒人免看火 · 少洗一个锅</span>
+                </div>
+                <span className="text-[11px] text-orange-700 bg-orange-100/70 px-1.5 py-0.5 rounded">
+                  {scaledCombo.cookwareCount ? `${scaledCombo.cookwareCount}个锅` : '一锅出'}
+                </span>
+              </div>
+            )}
+
             <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
               {combo.tags.map((tag, i) => (
                 <span
@@ -260,37 +298,46 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
               ))}
             </div>
 
-            {/* Key Information Badges: 25分钟 · 1人份 · 小白友好 */}
-            <div className="mt-3 pt-3 border-t border-stone-100 grid grid-cols-3 gap-2 text-center">
+            {/* 诚实耗时与关键信息展示 (V0.4.6: 区分动手时间与等待时间) */}
+            <div className="mt-3 pt-3 border-t border-stone-100 grid grid-cols-4 gap-1.5 text-center">
               <div className="bg-[#FAF7F2] py-2 px-1 rounded-xl border border-stone-200/50">
                 <span className="text-[10px] text-stone-400 block flex items-center justify-center gap-0.5 mb-0.5">
-                  <Clock className="w-3 h-3 text-orange-500" /> 预计耗时
+                  <ChefHat className="w-3 h-3 text-orange-600" /> 动手切配
                 </span>
-                <span className="text-xs font-bold text-stone-800">
-                  {scaledCombo.estimatedTimeMinutes} 分钟
+                <span className="text-xs font-black text-orange-700">
+                  {scaledCombo.activeTimeMinutes || 6} 分钟
                 </span>
               </div>
 
               <div className="bg-[#FAF7F2] py-2 px-1 rounded-xl border border-stone-200/50">
                 <span className="text-[10px] text-stone-400 block flex items-center justify-center gap-0.5 mb-0.5">
-                  <User className="w-3 h-3 text-orange-500" /> 适合份量
+                  <Clock className="w-3 h-3 text-stone-500" /> 等待烹煮
+                </span>
+                <span className="text-xs font-bold text-stone-700">
+                  {scaledCombo.passiveTimeMinutes || 20} 分钟
+                </span>
+              </div>
+
+              <div className="bg-[#FAF7F2] py-2 px-1 rounded-xl border border-stone-200/50">
+                <span className="text-[10px] text-stone-400 block flex items-center justify-center gap-0.5 mb-0.5">
+                  <Sparkles className="w-3 h-3 text-amber-500" /> 锅具清洗
+                </span>
+                <span className="text-xs font-bold text-stone-800">
+                  {scaledCombo.cookwareCount || 1} 个锅
+                </span>
+              </div>
+
+              <div className="bg-[#FAF7F2] py-2 px-1 rounded-xl border border-stone-200/50">
+                <span className="text-[10px] text-stone-400 block flex items-center justify-center gap-0.5 mb-0.5">
+                  <User className="w-3 h-3 text-stone-500" /> 适合份量
                 </span>
                 <span className="text-xs font-bold text-stone-800">
                   {scaledCombo.servingSize || `${servings}人份`}
                 </span>
               </div>
-
-              <div className="bg-[#FAF7F2] py-2 px-1 rounded-xl border border-stone-200/50">
-                <span className="text-[10px] text-stone-400 block flex items-center justify-center gap-0.5 mb-0.5">
-                  <ChefHat className="w-3 h-3 text-amber-500" /> 烹饪难度
-                </span>
-                <span className="text-xs font-bold text-stone-800">
-                  {scaledCombo.difficulty || '小白友好'}
-                </span>
-              </div>
             </div>
 
-            {/* 人数份量选择 (V0.4 新增：1人/2人/3人/4人切换) */}
+            {/* 人数份量选择 (V0.4.5: 1人/2人/3人/4人切换) */}
             <div className="mt-3 pt-3 border-t border-stone-100">
               <ServingsSegment
                 value={servings}
@@ -298,7 +345,7 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
               />
             </div>
 
-            <p className="text-xs text-stone-500 mt-2.5 leading-relaxed">
+            <p className="text-xs text-stone-600 mt-2.5 leading-relaxed bg-stone-50 p-2.5 rounded-xl border border-stone-200/60">
               💡 {scaledCombo.recommendationReason}
             </p>
           </div>
@@ -352,10 +399,19 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
                       <p className="text-[11px] text-stone-500 mt-0.5 line-clamp-1">
                         {recipe.summary}
                       </p>
-                      <div className="text-[10px] text-stone-400 mt-1 flex items-center gap-2">
-                        <span>约 {recipe.cookTimeMinutes} 分钟</span>
+                      <div className="text-[10px] text-stone-400 mt-1 flex items-center gap-1.5 flex-wrap">
+                        {recipe.equipment?.some(eq => eq.includes('rice-cooker') || eq.includes('电饭煲')) ? (
+                          <span className="bg-amber-100/90 text-amber-900 font-bold px-1.5 py-0.2 rounded">
+                            电饭煲
+                          </span>
+                        ) : recipe.onePot ? (
+                          <span className="bg-orange-100/90 text-orange-900 font-bold px-1.5 py-0.2 rounded">
+                            一锅出
+                          </span>
+                        ) : null}
+                        <span>动手 {recipe.activeTimeMinutes || 6}分</span>
                         <span>·</span>
-                        <span>{recipe.difficulty}</span>
+                        <span>等待 {recipe.passiveTimeMinutes || Math.max(10, recipe.cookTimeMinutes)}分</span>
                         {servings > 1 && (
                           <>
                             <span>·</span>
@@ -629,19 +685,17 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
 
                 {showGroceries && (
                   <div className="pt-2 border-t border-stone-100 grid grid-cols-2 gap-1.5 text-xs animate-in fade-in duration-150">
-                    {scaledCombo.recipes
-                      .flatMap((r) => r.ingredients)
-                      .map((ing, idx) => (
-                        <div
-                          key={idx}
-                          className="flex items-center justify-between bg-[#FAF7F2] px-2.5 py-1.5 rounded-lg text-stone-700 border border-stone-200/50"
-                        >
-                          <span className="font-medium truncate pr-1">{ing.name}</span>
-                          <span className="text-[11px] text-stone-500 shrink-0">
-                            {ing.amount} {ing.unit}
-                          </span>
-                        </div>
-                      ))}
+                    {mergedMealGroceries.map((ing, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between bg-[#FAF7F2] px-2.5 py-1.5 rounded-lg text-stone-700 border border-stone-200/50"
+                      >
+                        <span className="font-medium truncate pr-1">{ing.name}</span>
+                        <span className="text-[11px] text-stone-500 shrink-0 font-mono">
+                          {ing.amount} {ing.unit}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -657,7 +711,7 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
                     <span>要准备什么 · 食材备料清单</span>
                   </div>
                   <span className="text-stone-400 text-[11px] flex items-center gap-0.5">
-                    {showGroceries ? '收起' : `展开查看 (${scaledCombo.ingredientCount} 样食材)`}
+                    {showGroceries ? '收起' : `展开查看 (${mergedMealGroceries.length} 样食材)`}
                     {showGroceries ? (
                       <ChevronUp className="w-3.5 h-3.5" />
                     ) : (
@@ -685,19 +739,17 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
 
                 {showGroceries && (
                   <div className="mt-3 pt-2.5 border-t border-stone-100 grid grid-cols-2 gap-2 text-xs animate-in fade-in duration-150">
-                    {scaledCombo.recipes
-                      .flatMap((r) => r.ingredients)
-                      .map((ing, idx) => (
-                        <div
-                          key={idx}
-                          className="flex items-center justify-between bg-[#FAF7F2] px-2.5 py-1.5 rounded-lg text-stone-700 border border-stone-200/50"
-                        >
-                          <span className="font-medium truncate pr-1">{ing.name}</span>
-                          <span className="text-[11px] text-stone-500 shrink-0">
-                            {ing.amount} {ing.unit}
-                          </span>
-                        </div>
-                      ))}
+                    {mergedMealGroceries.map((ing, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between bg-[#FAF7F2] px-2.5 py-1.5 rounded-lg text-stone-700 border border-stone-200/50"
+                      >
+                        <span className="font-medium truncate pr-1">{ing.name}</span>
+                        <span className="text-[11px] text-stone-500 shrink-0 font-mono">
+                          {ing.amount} {ing.unit}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -725,23 +777,39 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
             </div>
 
             {showNutrition && (
-              <div className="mt-2.5 pt-2.5 border-t border-stone-100 grid grid-cols-4 gap-1.5 text-center text-xs animate-in fade-in duration-150">
-                <div className="bg-stone-50 py-1.5 rounded-lg">
-                  <span className="text-[10px] text-stone-400 block">热量</span>
-                  <span className="font-bold text-stone-700">{scaledCombo.totalCalories} kcal</span>
+              <div className="mt-2.5 pt-2.5 border-t border-stone-100 space-y-2 animate-in fade-in duration-150">
+                <div className="grid grid-cols-4 gap-1.5 text-center text-xs">
+                  <div className="bg-stone-50 py-1.5 rounded-lg">
+                    <span className="text-[10px] text-stone-400 block">热量</span>
+                    <span className="font-bold text-stone-700">{scaledCombo.totalCalories} kcal</span>
+                  </div>
+                  <div className="bg-stone-50 py-1.5 rounded-lg">
+                    <span className="text-[10px] text-stone-400 block">蛋白质</span>
+                    <span className="font-bold text-stone-700">{scaledCombo.totalProtein}g</span>
+                  </div>
+                  <div className="bg-stone-50 py-1.5 rounded-lg">
+                    <span className="text-[10px] text-stone-400 block">碳水</span>
+                    <span className="font-bold text-stone-700">{scaledCombo.totalCarbs}g</span>
+                  </div>
+                  <div className="bg-stone-50 py-1.5 rounded-lg">
+                    <span className="text-[10px] text-stone-400 block">脂肪</span>
+                    <span className="font-bold text-stone-700">{scaledCombo.totalFat}g</span>
+                  </div>
                 </div>
-                <div className="bg-stone-50 py-1.5 rounded-lg">
-                  <span className="text-[10px] text-stone-400 block">蛋白质</span>
-                  <span className="font-bold text-stone-700">{scaledCombo.totalProtein}g</span>
-                </div>
-                <div className="bg-stone-50 py-1.5 rounded-lg">
-                  <span className="text-[10px] text-stone-400 block">碳水</span>
-                  <span className="font-bold text-stone-700">{scaledCombo.totalCarbs}g</span>
-                </div>
-                <div className="bg-stone-50 py-1.5 rounded-lg">
-                  <span className="text-[10px] text-stone-400 block">脂肪</span>
-                  <span className="font-bold text-stone-700">{scaledCombo.totalFat}g</span>
-                </div>
+
+                {scaledCombo.nutritionValidation && (
+                  <div className="text-[11px] text-stone-500 bg-stone-50/80 p-2.5 rounded-xl text-left border border-stone-200/50 space-y-1">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-stone-400">单餐宏量营养摄入估算</span>
+                      <span className="text-emerald-600 font-medium">结构与数量充足</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 text-[10px] text-stone-600 pt-0.5">
+                      <div>蛋白: {scaledCombo.totalProtein}g <span className="text-stone-400">({scaledCombo.nutritionValidation.targetRanges.protein.min}~{scaledCombo.nutritionValidation.targetRanges.protein.max}g)</span></div>
+                      <div>碳水: {scaledCombo.totalCarbs}g <span className="text-stone-400">({scaledCombo.nutritionValidation.targetRanges.carbs.min}~{scaledCombo.nutritionValidation.targetRanges.carbs.max}g)</span></div>
+                      <div>脂肪: {scaledCombo.totalFat}g <span className="text-stone-400">({scaledCombo.nutritionValidation.targetRanges.fat.min}~{scaledCombo.nutritionValidation.targetRanges.fat.max}g)</span></div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

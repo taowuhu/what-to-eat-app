@@ -24,7 +24,7 @@ export const QUICK_FILTERS: QuickFilterOption[] = [
   {
     id: 'single_person',
     label: '一人食',
-    subtitle: '份量刚好',
+    subtitle: '一碗搞定',
     iconName: 'User',
   },
   {
@@ -34,10 +34,10 @@ export const QUICK_FILTERS: QuickFilterOption[] = [
     iconName: 'Flame',
   },
   {
-    id: 'homestyle',
-    label: '家常菜',
-    subtitle: '经典少油',
-    iconName: 'Utensils',
+    id: 'lazy_mode',
+    label: '懒人模式',
+    subtitle: '电饭煲/少洗锅',
+    iconName: 'Sparkles',
   },
 ];
 

@@ -52,7 +52,7 @@ import { QAReportView } from './components/QAReportView';
 import { Check, Sparkles, ChefHat } from 'lucide-react';
 
 const isDebugRoute = () => {
-  if (typeof window === 'undefined' || !import.meta.env.DEV) return false;
+  if (typeof window === 'undefined') return false;
   const path = window.location.pathname;
   const hash = window.location.hash;
   const search = window.location.search;
@@ -60,12 +60,13 @@ const isDebugRoute = () => {
     path === '/debug/recipes' ||
     path.endsWith('/debug/recipes') ||
     hash.includes('/debug/recipes') ||
+    hash.includes('#recipes') ||
     search.includes('debug=recipes')
   );
 };
 
 const isQARoute = () => {
-  if (typeof window === 'undefined' || !import.meta.env.DEV) return false;
+  if (typeof window === 'undefined') return false;
   const path = window.location.pathname;
   const hash = window.location.hash;
   const search = window.location.search;
@@ -73,6 +74,7 @@ const isQARoute = () => {
     path === '/debug/qa' ||
     path.endsWith('/debug/qa') ||
     hash.includes('/debug/qa') ||
+    hash.includes('#qa') ||
     search.includes('debug=qa')
   );
 };
@@ -331,7 +333,7 @@ export default function App() {
   // [入口 B: 帮我安排一天] Core Handlers
   // ==========================================
   const handleDecideDay = () => {
-    const newPlan = generateDayMealPlan(userProfile, pantryIngredients, clearFridgeMode);
+    const newPlan = generateDayMealPlan(userProfile, pantryIngredients, clearFridgeMode, selectedFilters);
     setDayPlan(newPlan);
     setIsDayPlanOpen(true);
   };
@@ -354,7 +356,15 @@ export default function App() {
         otherRecipeIds.push(...dayPlan.dinner.recipes.map(r => r.id));
       }
 
-      const newSlot = generateMealSlot(mealType, userProfile, otherRecipeIds, pantryIngredients, clearFridgeMode);
+      const newSlot = generateMealSlot(
+        mealType,
+        userProfile,
+        otherRecipeIds,
+        undefined,
+        pantryIngredients,
+        clearFridgeMode,
+        selectedFilters
+      );
 
       const updatedPlan: DayMealPlan = {
         ...dayPlan,
@@ -470,19 +480,34 @@ export default function App() {
     showToast('已移除该条做饭记录');
   };
 
-  if (import.meta.env.DEV && isQAView) {
+  if (isQAView) {
     return (
       <QAReportView
         onBackToHome={() => {
-          window.history.pushState(null, '', '/');
+          try {
+            window.history.pushState(null, '', '/');
+          } catch {
+            // ignore
+          }
           setIsQAView(false);
         }}
       />
     );
   }
 
-  if (import.meta.env.DEV && isDebugView) {
-    return <RecipeDebugPage />;
+  if (isDebugView) {
+    return (
+      <RecipeDebugPage
+        onBackToHome={() => {
+          try {
+            window.history.pushState(null, '', '/');
+          } catch {
+            // ignore
+          }
+          setIsDebugView(false);
+        }}
+      />
+    );
   }
 
   return (
@@ -531,23 +556,11 @@ export default function App() {
                 onExploreLibrary={() => setCurrentTab('library')}
               />
 
-              {/* Discreet subtle note: low-key background nutrition reassurance & QA verification link */}
-              <div className="py-2.5 px-3 rounded-xl bg-stone-100/60 border border-stone-200/50 text-center space-y-1">
+              {/* Discreet subtle note: low-key background nutrition reassurance */}
+              <div className="py-2.5 px-3 rounded-xl bg-stone-100/60 border border-stone-200/50 text-center">
                 <p className="text-[11px] text-stone-400">
                   后台已结合科学营养目标自动控油少盐，专注享受下厨乐趣
                 </p>
-                <div className="pt-1 flex items-center justify-center gap-3 text-[10px] text-stone-400">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      window.history.pushState(null, '', '/debug/qa');
-                      setIsQAView(true);
-                    }}
-                    className="hover:text-orange-600 transition underline underline-offset-2"
-                  >
-                    V0.4.1 QA 真实路径质量报告 (/debug/qa)
-                  </button>
-                </div>
               </div>
             </div>
           )}
@@ -627,6 +640,8 @@ export default function App() {
           defaultServings={userProfile.defaultServings || 1}
           favoriteRecipeIds={favoriteRecipeIds}
           onToggleFavorite={handleToggleFavorite}
+          pantryIngredientIds={pantryIngredients}
+          clearFridgeMode={clearFridgeMode}
         />
 
         {/* Modal: Recipe Details (Priority: What to eat -> What to buy -> How to cook -> Nutrition) */}

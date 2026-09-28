@@ -16,7 +16,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 
-export function RecipeDebugPage() {
+export function RecipeDebugPage({ onBackToHome }: { onBackToHome?: () => void } = {}) {
   const [sampleSeed, setSampleSeed] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -41,6 +41,7 @@ export function RecipeDebugPage() {
       shrimp: 0,
       egg: 0,
       tofu: 0,
+      dairy: 0,
       none: 0,
     };
     const difficultyCounts: Record<string, number> = {};
@@ -173,6 +174,10 @@ export function RecipeDebugPage() {
   }, [sampledRecipes, searchTerm, categoryFilter]);
 
   const handleReturnHome = () => {
+    if (onBackToHome) {
+      onBackToHome();
+      return;
+    }
     window.location.href = window.location.pathname.replace('/debug/recipes', '') || '/';
   };
 
