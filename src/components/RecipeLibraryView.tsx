@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Search, Clock, Flame, ChefHat, Filter, Sparkles, X, ChevronRight, Utensils, Star } from 'lucide-react';
 import { Recipe, RecipeCategory, ProteinSource, RecipeDifficulty } from '../types';
-import { ALL_RECIPES } from '../data/recipes';
+import { ALL_RECIPES, getPublicRecipes } from '../data/recipes';
 
 interface RecipeLibraryViewProps {
   onSelectRecipe: (recipe: Recipe) => void;
@@ -60,8 +60,10 @@ export const RecipeLibraryView: React.FC<RecipeLibraryViewProps> = ({
     );
   };
 
+  const publicRecipes = useMemo(() => getPublicRecipes(), []);
+
   const filteredRecipes = useMemo(() => {
-    return ALL_RECIPES.filter((r) => {
+    return publicRecipes.filter((r) => {
       // 1. Category filter
       if (selectedCategory !== 'all') {
         if (selectedCategory === 'favorites') {
@@ -122,7 +124,7 @@ export const RecipeLibraryView: React.FC<RecipeLibraryViewProps> = ({
           <div>
             <h2 className="text-base font-bold text-stone-900">家常菜谱库</h2>
             <p className="text-[11px] text-stone-500">
-              收录 {ALL_RECIPES.length} 道中国家庭真实会做常吃的健康菜式
+              收录 {publicRecipes.length} 道中国家庭真实会做常吃的健康菜式
             </p>
           </div>
           <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2.5 py-1 rounded-full border border-orange-200/60">

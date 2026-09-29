@@ -60,16 +60,35 @@ export function generateMealRecommendation(options: RecommendationOptions): Meal
   const cleanPool = filterStrictExclusions(ALL_RECIPES, userProfile.strictlyExclude);
 
   // Apply history penalty: recipes cooked recently are filtered out from top selection if alternatives exist
+  // When pantry intent is active, preserve all cleanPool recipes so higher coverage tiers are never eliminated!
+  // History is scored as a soft penalty within the highest pantry coverage tier.
   let pool = cleanPool;
-  if (historyRecipeIds.length > 0) {
+  if (historyRecipeIds.length > 0 && pantryIngredientIds.length === 0) {
     const unvisited = cleanPool.filter(r => !historyRecipeIds.includes(r.id));
     if (unvisited.length >= 20) {
       pool = unvisited;
     }
   }
 
-  // De-prioritize most recent protein if multiple options exist
-  const lastProtein = recentProteins.length > 0 ? recentProteins[recentProteins.length - 1] : undefined;
+  // De-prioritize most recent protein if multiple options exist,
+  // UNLESS it directly corresponds to a pantry ingredient the user explicitly selected!
+  let lastProtein = recentProteins.length > 0 ? recentProteins[recentProteins.length - 1] : undefined;
+  if (lastProtein && pantryIngredientIds.length > 0) {
+    const isPantryProtein = pantryIngredientIds.some(id => {
+      const lower = id.toLowerCase();
+      if (lastProtein === 'beef' && (lower.includes('beef') || lower.includes('牛'))) return true;
+      if (lastProtein === 'chicken' && (lower.includes('chicken') || lower.includes('鸡'))) return true;
+      if (lastProtein === 'pork' && (lower.includes('pork') || lower.includes('猪') || lower.includes('排骨'))) return true;
+      if (lastProtein === 'fish' && (lower.includes('fish') || lower.includes('鱼'))) return true;
+      if (lastProtein === 'shrimp' && (lower.includes('shrimp') || lower.includes('虾'))) return true;
+      if (lastProtein === 'egg' && (lower.includes('egg') || lower.includes('蛋'))) return true;
+      if (lastProtein === 'tofu' && (lower.includes('tofu') || lower.includes('豆腐') || lower.includes('豆制品'))) return true;
+      return false;
+    });
+    if (isPantryProtein) {
+      lastProtein = undefined; // Pantry Intent strictly overrides protein alternation!
+    }
+  }
 
   return composeMeal(pool, {
     mealType,
@@ -126,7 +145,18 @@ export function generateAlternativeMeals(
   for (let i = 0; i < count; i++) {
     const track = proteinTracks[i % proteinTracks.length];
     // Pick preferred protein from track
-    const randomProtein = track.primary[Math.floor(Math.random() * track.primary.length)];
+    let randomProtein: ProteinSource | undefined = track.primary[Math.floor(Math.random() * track.primary.length)];
+
+    // When pantry is active, don't force a protein preference if it would prevent pantry matching
+    if (pantryIngredientIds.length > 0) {
+      const hasTrackPantry = cleanPool.some(r =>
+        r.proteinSource === randomProtein &&
+        r.ingredients?.some(ing => pantryIngredientIds.some(p => ing.name.includes(p) || p.includes(ing.name)))
+      );
+      if (!hasTrackPantry) {
+        randomProtein = undefined; // Don't restrict protein if track has no pantry matches
+      }
+    }
 
     const combo = composeMeal(cleanPool, {
       mealType: i === 2 ? 'dinner' : mealType,

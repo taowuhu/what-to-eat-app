@@ -10,8 +10,13 @@ import {
   CookingFeedback,
   RecommendationFeedback,
 } from '../types';
-import { getRecipeById, ALL_RECIPES } from '../data/recipes';
-import { isIngredientMatched, auditMealPantryCoverage } from './ingredientMatcher';
+import { getRecipeById, ALL_RECIPES, isFoodComponent } from '../data/recipes';
+import {
+  isIngredientMatched,
+  auditMealPantryCoverage,
+  getRecipeMatchedPantryIds,
+  getComboMatchedPantryIds,
+} from './ingredientMatcher';
 import { calculateRecipePantryScore } from './pantryScorer';
 import {
   filterStrictExclusions,
@@ -282,19 +287,19 @@ export function composeBreakfastMeal(
 
   // Filter pool for breakfast recipes
   const breakfastPool = availablePool.filter(r =>
-    (r.mealTypes?.includes('breakfast') || r.category === 'breakfast' || r.id.startsWith('bk_') || r.id.startsWith('cmp_') || r.tags?.includes('早餐')) &&
+    (r.mealTypes?.includes('breakfast') || r.category === 'breakfast' || r.id.startsWith('bk_') || isFoodComponent(r) || r.tags?.includes('早餐')) &&
     !avoidRecipeIds.includes(r.id)
   );
   const pool = breakfastPool.length >= 3 ? breakfastPool : safePool.filter(r =>
-    r.mealTypes?.includes('breakfast') || r.category === 'breakfast' || r.id.startsWith('bk_') || r.id.startsWith('cmp_')
+    r.mealTypes?.includes('breakfast') || r.category === 'breakfast' || r.id.startsWith('bk_') || isFoodComponent(r)
   );
 
   // Categorize breakfast items
   // 1. Complete breakfast recipes (e.g., 三明治、牛奶燕麦粥配水煮蛋、小馄饨、瘦肉粥、汤面)
-  const completeBreakfasts = pool.filter(r => validateMealNutrition([r], 'breakfast', userProfile).isComplete);
+  let completeBreakfasts = pool.filter(r => validateMealNutrition([r], 'breakfast', userProfile).isComplete);
 
   // 2. Staple components (馒头、南瓜粥、全麦吐司、燕麦、甜玉米) - excluding complete breakfasts that already contain meat/eggs
-  const stapleComponents = pool.filter(r =>
+  let stapleComponents = pool.filter(r =>
     !completeBreakfasts.some(c => c.id === r.id) &&
     (
       r.category === 'staple' ||
@@ -304,15 +309,15 @@ export function composeBreakfastMeal(
   );
 
   // 3. Simple standalone protein components (水煮蛋、蒸蛋、煎蛋、鸡胸肉条、希腊酸奶)
-  const proteinComponents = pool.filter(r =>
-    (r.id.startsWith('cmp_') && (r.name.includes('蛋') || r.name.includes('鸡') || r.name.includes('酸奶'))) ||
+  let proteinComponents = pool.filter(r =>
+    (isFoodComponent(r) && (r.name.includes('蛋') || r.name.includes('鸡') || r.name.includes('酸奶'))) ||
     r.id === 'rc_steamed_egg' ||
     (r.category !== 'staple' && !r.name.includes('面') && !r.name.includes('饭') && !r.name.includes('粥') && !r.name.includes('馄饨') && (r.proteinSource && r.proteinSource !== 'none'))
   );
 
   // 4. Drink & Fruit components (牛奶、豆浆、香蕉、圣女果)
-  const drinkFruitComponents = pool.filter(r =>
-    r.id.startsWith('cmp_') && (r.name.includes('奶') || r.name.includes('豆浆') || r.name.includes('香蕉') || r.name.includes('圣女果'))
+  let drinkFruitComponents = pool.filter(r =>
+    isFoodComponent(r) && (r.name.includes('奶') || r.name.includes('豆浆') || r.name.includes('香蕉') || r.name.includes('圣女果'))
   );
 
   // Reliable fallback components
@@ -329,10 +334,42 @@ export function composeBreakfastMeal(
     : calculateMacroTargets(DEFAULT_USER_PROFILE);
   const mealTarget = getMealMacroTarget(dailyTarget, 'breakfast');
 
+  // When pantry is active, prioritize breakfast candidate pools matching user's pantry
+  if (hasPantry) {
+    const pantryComplete = completeBreakfasts.filter(r => getRecipeMatchedPantryIds(r, pantryIngredientIds).length > 0);
+    if (pantryComplete.length > 0) {
+      completeBreakfasts = pantryComplete;
+    }
+    const pantryStaples = stapleComponents.filter(r => getRecipeMatchedPantryIds(r, pantryIngredientIds).length > 0);
+    if (pantryStaples.length > 0) {
+      stapleComponents = pantryStaples;
+    }
+    const pantryProteins = proteinComponents.filter(r => getRecipeMatchedPantryIds(r, pantryIngredientIds).length > 0);
+    if (pantryProteins.length > 0) {
+      proteinComponents = pantryProteins;
+    }
+    const pantryDrinks = drinkFruitComponents.filter(r => getRecipeMatchedPantryIds(r, pantryIngredientIds).length > 0);
+    if (pantryDrinks.length > 0) {
+      drinkFruitComponents = pantryDrinks;
+    }
+  }
+
   let selectedRecipes: Recipe[] = [];
 
   // Decide whether to serve a Complete Integrated Breakfast or an Assembled Component Combo
-  const preferCombo = Math.random() < 0.6 || completeBreakfasts.length === 0;
+  const hasPantryComplete = hasPantry && completeBreakfasts.some(r => getRecipeMatchedPantryIds(r, pantryIngredientIds).length > 0);
+  const hasPantryComponents = hasPantry && (
+    stapleComponents.some(r => getRecipeMatchedPantryIds(r, pantryIngredientIds).length > 0) ||
+    proteinComponents.some(r => getRecipeMatchedPantryIds(r, pantryIngredientIds).length > 0) ||
+    drinkFruitComponents.some(r => getRecipeMatchedPantryIds(r, pantryIngredientIds).length > 0)
+  );
+
+  let preferCombo = Math.random() < 0.6 || completeBreakfasts.length === 0;
+  if (hasPantryComplete && !hasPantryComponents) {
+    preferCombo = false; // Prioritize complete breakfast with pantry match
+  } else if (!hasPantryComplete && hasPantryComponents) {
+    preferCombo = true; // Prioritize component combo with pantry match
+  }
 
   if (!preferCombo && completeBreakfasts.length > 0) {
     const mainBreakfast = weightedPickByScore(completeBreakfasts, scoringContext, { topRatio: 0.4, temperature: 0.85 });
@@ -406,10 +443,14 @@ export function composeBreakfastMeal(
       selectedRecipes.unshift(wholeWheatMantou);
     }
     if (!validation.hasFatSource) {
-      if (!selectedRecipes.some(r => r.name.includes('蛋') || (r.proteinSource && r.proteinSource !== 'none'))) {
-        if (panFriedEgg) selectedRecipes.push(panFriedEgg);
+      if (!selectedRecipes.some(r => r.name.includes('蛋'))) {
+        if (boiledEgg && !selectedRecipes.some(r => r.id === boiledEgg.id)) {
+          selectedRecipes.push(boiledEgg);
+        } else if (panFriedEgg) {
+          selectedRecipes.push(panFriedEgg);
+        }
       } else if (selectedRecipes[0]) {
-        selectedRecipes[0] = tuneRecipeNutritionalPortions(selectedRecipes[0], { fatMultiplier: 1.35 });
+        selectedRecipes[0] = tuneRecipeNutritionalPortions(selectedRecipes[0], { fatMultiplier: 1.5 });
       }
     }
     // Prevent single item
@@ -427,7 +468,7 @@ export function composeBreakfastMeal(
   // Layer 2: Macro Adequacy Repair Loop (Bidirectional & Component Redundancy Cleanup)
   // Check component redundancies: strictly prevent multiple protein dishes (e.g. egg + chicken breast, or egg + milk)
   const isProteinSourceRecipe = (r: Recipe) =>
-    (r.id.startsWith('cmp_') && (r.name.includes('蛋') || r.name.includes('鸡') || r.name.includes('酸奶') || r.name.includes('奶') || r.name.includes('豆浆'))) ||
+    (isFoodComponent(r) && (r.name.includes('蛋') || r.name.includes('鸡') || r.name.includes('酸奶') || r.name.includes('奶') || r.name.includes('豆浆'))) ||
     r.id === 'rc_steamed_egg' ||
     (r.proteinSource && r.proteinSource !== 'none' && !isPureStapleRecipe(r));
 
@@ -437,7 +478,7 @@ export function composeBreakfastMeal(
     const dropCandidate = protItems[protItems.length - 1];
     const candidateList = selectedRecipes.filter(r => r.id !== dropCandidate.id);
     const testVal = validateMealNutrition(candidateList, 'breakfast', userProfile);
-    if (testVal.proteinAmount >= mealTarget.protein.min * 0.85) {
+    if (testVal.isComplete && testVal.proteinAmount >= mealTarget.protein.min * 0.85) {
       selectedRecipes = candidateList;
       protItems = selectedRecipes.filter(isProteinSourceRecipe);
       validation = testVal;
@@ -530,7 +571,14 @@ export function composeBreakfastMeal(
       keptOneStaple = true;
     }
     if (isProteinSourceRecipe(r)) {
-      if (keptOneProtein) continue; // Guarantee NO duplicate protein component stacking
+      if (keptOneProtein) {
+        // Only drop if dropping does not destroy meal completeness (e.g. fat source)
+        const withoutR = selectedRecipes.filter(x => x.id !== r.id);
+        const testV = validateMealNutrition(withoutR, 'breakfast', userProfile);
+        if (testV.isComplete) {
+          continue; // Safe to drop redundant protein
+        }
+      }
       keptOneProtein = true;
     }
     seenIds.add(r.id);
@@ -615,6 +663,30 @@ export function composeBreakfastMeal(
   if (isLazyMode) tags.push('懒人免繁琐');
   if (totalProtein >= 20) tags.push('高蛋白');
 
+  // Final Breakfast Pantry Guardrail & Tier Enforcement
+  let pantryFallback = false;
+  if (hasPantry) {
+    const matchedPantry = getComboMatchedPantryIds(selectedRecipes, pantryIngredientIds);
+    if (matchedPantry.length === 0) {
+      const pantryPool = pool.filter(r => getRecipeMatchedPantryIds(r, pantryIngredientIds).length > 0);
+      if (pantryPool.length > 0) {
+        pantryPool.sort((a, b) =>
+          getRecipeMatchedPantryIds(b, pantryIngredientIds).length -
+          getRecipeMatchedPantryIds(a, pantryIngredientIds).length
+        );
+        const topDish = pantryPool[0];
+        selectedRecipes = [topDish];
+        if (topDish.protein < mealTarget.protein.min && boiledEgg && topDish.id !== boiledEgg.id) {
+          selectedRecipes.push(boiledEgg);
+        }
+        validation = validateMealNutrition(selectedRecipes, 'breakfast', userProfile);
+        pantryFallback = false;
+      } else {
+        pantryFallback = true;
+      }
+    }
+  }
+
   // Audit pantry coverage
   const pantryAudit = hasPantry
     ? auditMealPantryCoverage(selectedRecipes, pantryIngredientIds, clearFridgeMode)
@@ -665,8 +737,10 @@ export function composeBreakfastMeal(
           })),
           matchedCanonicalNames: pantryAudit.matchedCanonicalNames,
           missingCanonicalNames: pantryAudit.missingCanonicalNames,
+          pantryFallback,
         }
       : undefined,
+    pantryFallback,
   };
 }
 
@@ -713,7 +787,13 @@ export function composeMeal(
   // 1. Separate pools by categories (applying strict exclusions first)
   const strictlyFiltered = filterStrictExclusions(availablePool, userProfile?.strictlyExclude);
   const pool = strictlyFiltered.filter(r => {
-    if (avoidRecipeIds.includes(r.id)) return false;
+    if (hasPantry) {
+      // When pantry intent is active, never hard-filter recipes that match pantry items!
+      const matchesPantry = getRecipeMatchedPantryIds(r, pantryIngredientIds).length > 0;
+      if (!matchesPantry && avoidRecipeIds.includes(r.id)) return false;
+    } else {
+      if (avoidRecipeIds.includes(r.id)) return false;
+    }
     if (mealType && (mealType === 'lunch' || mealType === 'dinner')) {
       if (r.mealTypes && r.mealTypes.length === 1 && r.mealTypes[0] === 'breakfast') return false;
       if (r.category === 'breakfast' && !r.mealTypes?.includes(mealType)) return false;
@@ -765,180 +845,363 @@ export function composeMeal(
     : calculateMacroTargets(DEFAULT_USER_PROFILE);
   const mealTarget = getMealMacroTarget(dailyTarget, mealType);
 
-  let complexity: MealComplexity;
-  if (isLazyMode) {
-    // Lazy mode strictly preserves single-cookware simplicity (1-pot / rice cooker)
-    complexity = 'simple';
-  } else if (servings === 1) {
-    if (is15Min || isTooTroublesome) {
-      complexity = Math.random() < 0.85 ? 'simple' : 'standard';
-    } else if (isSinglePersonFilter) {
-      complexity = Math.random() < 0.72 ? 'simple' : 'standard';
-    } else {
-      complexity = Math.random() < 0.62 ? 'simple' : 'standard';
-    }
-  } else if (servings === 2) {
-    const rand = Math.random();
-    if (rand < 0.25) complexity = 'simple';
-    else if (rand < 0.95) complexity = 'standard';
-    else complexity = 'rich';
-  } else {
-    // 3~4 people
-    complexity = Math.random() < 0.55 ? 'rich' : 'standard';
-  }
-
   let selectedRecipes: Recipe[] = [];
+  let complexity: MealComplexity = 'simple';
 
-  if (complexity === 'simple') {
+  if (hasPantry) {
     // =========================================================================
-    // 1. Simple (极简一餐): 1道完整一锅出/焖饭/炒面/盖饭 (必须包含肉蛋+菜+主食)
+    // V0.4.8.2 Max Coverage First Candidate Architecture
+    // 1. Hard Exclusion
+    // 2. Meal Completeness
+    // 3. Mode Constraints (Lazy / Single / Time)
+    // 4. Calculate Max Achievable Pantry Coverage on whole meal
+    // 5. Strictly lock top tier to maxAchievableCoverage
+    // 6. Rank within top tier by Lazy Score / Preference / History
     // =========================================================================
-    let candidateIntegrated = safeIntegrated.filter(r => !avoidRecipeIds.includes(r.id));
-    if (candidateIntegrated.length === 0) candidateIntegrated = safeIntegrated;
-
-    if (avoidProtein) {
-      const filtered = candidateIntegrated.filter(r => r.proteinSource !== avoidProtein);
-      if (filtered.length > 0) candidateIntegrated = filtered;
+    interface CandidateMeal {
+      recipes: Recipe[];
+      coverage: number;
+      matchedPantryIds: string[];
+      complexity: MealComplexity;
+      onePot: boolean;
+      cookwareCount: number;
+      activeTimeMinutes: number;
+      passiveTimeMinutes: number;
+      isLazyCompatible: boolean;
+      score: number;
     }
-    if (preferredProtein) {
-      const matched = candidateIntegrated.filter(r => r.proteinSource === preferredProtein);
-      if (matched.length > 0) candidateIntegrated = matched;
+
+    const candidateMeals: CandidateMeal[] = [];
+
+    // A. Single integrated dishes (Protein + Veg + Staple in 1 dish)
+    for (const r of safeIntegrated) {
+      const m = getRecipeMatchedPantryIds(r, pantryIngredientIds);
+      const isOnePot = Boolean(r.onePot || r.tags.includes('电饭煲') || r.equipment?.includes('电饭煲'));
+      const cookware = r.cookwareCount || (isOnePot ? 1 : 2);
+      const active = r.activeTimeMinutes || r.prepTimeMinutes || 7;
+      const passive = r.passiveTimeMinutes || r.cookTimeMinutes || 25;
+      candidateMeals.push({
+        recipes: [r],
+        coverage: m.length,
+        matchedPantryIds: m,
+        complexity: 'simple',
+        onePot: isOnePot,
+        cookwareCount: cookware,
+        activeTimeMinutes: active,
+        passiveTimeMinutes: passive,
+        isLazyCompatible: true,
+        score: 0,
+      });
     }
 
-    if (hasPantry) {
-      const pantryMatchingIntegrated = candidateIntegrated.filter(r =>
-        r.ingredients.some(i => i.category !== '调料辅料' && isIngredientMatched(i, pantryIngredientIds))
-      );
-      if (pantryMatchingIntegrated.length > 0) {
-        candidateIntegrated = pantryMatchingIntegrated;
+    // B. Integrated dish + quick vegetable side dish (to cover remaining pantry items!)
+    for (const r of safeIntegrated) {
+      const mR = getRecipeMatchedPantryIds(r, pantryIngredientIds);
+      const unmatched = pantryIngredientIds.filter(p => !mR.includes(p));
+      if (unmatched.length > 0) {
+        const matchingSides = safeVegs.filter(v =>
+          getRecipeMatchedPantryIds(v, unmatched).length > 0 &&
+          !hasIngredientConflict(r, v)
+        );
+        for (const side of matchingSides) {
+          const comboM = getComboMatchedPantryIds([r, side], pantryIngredientIds);
+          const active = (r.activeTimeMinutes || 6) + (side.activeTimeMinutes || side.prepTimeMinutes || 2);
+          const passive = Math.max(r.passiveTimeMinutes || 25, side.passiveTimeMinutes || 5);
+          candidateMeals.push({
+            recipes: [r, side],
+            coverage: comboM.length,
+            matchedPantryIds: comboM,
+            complexity: 'simple',
+            onePot: false,
+            cookwareCount: 2,
+            activeTimeMinutes: active,
+            passiveTimeMinutes: passive,
+            isLazyCompatible: active <= 12,
+            score: 0,
+          });
+        }
       }
     }
 
-    const primaryDish = weightedPickByScore(candidateIntegrated, scoringContext, {
-      topRatio: hasPantry ? (clearFridgeMode ? 0.2 : 0.3) : (isLazyMode ? 0.25 : 0.35),
-      minPool: hasPantry ? 2 : 3,
-      temperature: hasPantry ? 1.0 : 0.8,
-    }) || candidateIntegrated[0];
+    // C. Main dish with vegetables + staple (2-dish complete meal)
+    for (const main of safeMains) {
+      const hasVeg = Boolean(main.ingredients?.some(i => i.category === '蔬菜菌菇')) || isTrueVegetableRecipe(main);
+      if (hasVeg) {
+        const staple = safeStaples[0];
+        const comboM = getComboMatchedPantryIds([main, staple], pantryIngredientIds);
+        if (comboM.length > 0) {
+          const audit = auditMealCompleteness([main, staple], mealType);
+          if (audit.isComplete) {
+            const active = (main.activeTimeMinutes || 5) + 1;
+            const passive = Math.max(main.passiveTimeMinutes || 10, staple.passiveTimeMinutes || 15);
+            candidateMeals.push({
+              recipes: [main, staple],
+              coverage: comboM.length,
+              matchedPantryIds: comboM,
+              complexity: 'simple',
+              onePot: false,
+              cookwareCount: 2,
+              activeTimeMinutes: active,
+              passiveTimeMinutes: passive,
+              isLazyCompatible: (main.activeTimeMinutes || 5) <= 8,
+              score: 0,
+            });
+          }
+        }
+      }
+    }
 
-    if (primaryDish && isTrueIntegratedMealRecipe(primaryDish, mealType)) {
-      if (Math.random() < 0.20 && !isLazyMode) {
-        const quickSides = safeVegs.filter(v =>
-          (v.cookTimeMinutes <= 8 || v.cookingMethod === '凉拌' || v.cookingMethod === '煮') &&
-          !hasIngredientConflict(primaryDish, v)
-        );
-        const sideDish = quickSides.length > 0
-          ? weightedPickByScore(quickSides, scoringContext, { minPool: 2 })
-          : undefined;
-        selectedRecipes = sideDish ? [primaryDish, sideDish] : [primaryDish];
+    // D. Standard 3-dish (Main + Veg + Staple)
+    for (const main of safeMains) {
+      const mainM = getRecipeMatchedPantryIds(main, pantryIngredientIds);
+      const unmatched = pantryIngredientIds.filter(p => !mainM.includes(p));
+      for (const veg of safeVegs) {
+        if (hasIngredientConflict(main, veg)) continue;
+        if (unmatched.length > 0 && getRecipeMatchedPantryIds(veg, unmatched).length === 0) continue;
+        const staple = safeStaples[0];
+        const comboM = getComboMatchedPantryIds([main, veg, staple], pantryIngredientIds);
+        if (comboM.length === 0) continue;
+        const active = (main.activeTimeMinutes || 5) + (veg.activeTimeMinutes || 4) + 1;
+        const passive = Math.max(main.passiveTimeMinutes || 10, veg.passiveTimeMinutes || 5, staple.passiveTimeMinutes || 15);
+        const cookware = Math.min(3, (main.cookwareCount || 1) + (veg.cookwareCount || 1));
+        candidateMeals.push({
+          recipes: [main, veg, staple],
+          coverage: comboM.length,
+          matchedPantryIds: comboM,
+          complexity: 'standard',
+          onePot: false,
+          cookwareCount: cookware,
+          activeTimeMinutes: active,
+          passiveTimeMinutes: passive,
+          isLazyCompatible: active <= 12 && cookware <= 2,
+          score: 0,
+        });
+      }
+    }
+
+    // Filter by mode constraints
+    let poolCandidates = isLazyMode
+      ? candidateMeals.filter(c => c.isLazyCompatible)
+      : candidateMeals;
+    if (poolCandidates.length === 0) poolCandidates = candidateMeals;
+
+    // Filter by avoidProtein if specified
+    if (avoidProtein) {
+      const filtered = poolCandidates.filter(c => !c.recipes.some(r => r.proteinSource === avoidProtein));
+      if (filtered.length > 0) poolCandidates = filtered;
+    }
+
+    let topTier: CandidateMeal[] = [];
+
+    if (isLazyMode && !clearFridgeMode) {
+      // =======================================================================
+      // V0.4.8.2 Lazy × Pantry Priority Balance
+      // Principle:
+      // Hard Exclusion -> Meal Completeness -> Lazy Feasibility
+      // -> Max Pantry Coverage WITHIN Lazy Feasible Pool -> Lazy Score -> Preference/History
+      //
+      // Priority in Pure Lazy Mode (Clear Fridge OFF):
+      // 1. Prioritize true one-pot / minimal-cookware (cookwareCount <= 1, onePot = true).
+      // 2. If true one-pot candidates exist matching ANY pantry ingredients:
+      //    Find max coverage achievable among them (e.g. 1/2).
+      //    Allow 1/2 one-pot meal. Do NOT force a second cookware just to get 2/2!
+      // 3. Only if NO true one-pot meal matches ANY pantry ingredient, fall back to 2-cookware combos.
+      // =======================================================================
+      const trueOnePotCandidates = poolCandidates.filter(
+        c => c.onePot && c.recipes.length === 1 && c.cookwareCount <= 1 && c.coverage > 0
+      );
+
+      if (trueOnePotCandidates.length > 0) {
+        const maxOnePotCoverage = Math.max(...trueOnePotCandidates.map(c => c.coverage));
+        topTier = trueOnePotCandidates.filter(c => c.coverage === maxOnePotCoverage);
       } else {
-        selectedRecipes = [primaryDish];
+        const maxAchievable = Math.max(0, ...poolCandidates.map(c => c.coverage));
+        topTier = poolCandidates.filter(c => c.coverage === maxAchievable);
       }
     } else {
-      // Fallback: If no integrated meal available, fall back to balanced 3-dish meal
-      const main = weightedPickByScore(safeMains, scoringContext, { minPool: 3 }) || safeMains[0];
-      const veg = safeVegs.find(v => !hasIngredientConflict(main, v)) || safeVegs[0];
-      const staple = safeStaples[0];
-      selectedRecipes = [main, veg, staple];
+      // =======================================================================
+      // Clear Fridge + Lazy OR Normal Pantry Mode:
+      // Max Coverage First takes precedence!
+      // When Clear Fridge is ON, user explicitly wants to consume maximum ingredients.
+      // Multi-dish / quick side (2 cookwares) is permitted to achieve 2/2.
+      // =======================================================================
+      const maxAchievable = Math.max(0, ...poolCandidates.map(c => c.coverage));
+      topTier = poolCandidates.filter(c => c.coverage === maxAchievable);
     }
 
-  } else if (complexity === 'standard') {
-    // =========================================================================
-    // 2. Standard (标准三道): 1主菜 + 1蔬菜 + 1主食
-    // =========================================================================
-    let candidateMains = [...safeMains];
-
-    if (activeFilters.includes('15min')) {
-      const quickMains = candidateMains.filter(r => r.cookTimeMinutes <= 15 || r.tags.includes('15分钟') || r.tags.includes('快手'));
-      if (quickMains.length > 0) candidateMains = quickMains;
-    }
-
-    if (hasPantry) {
-      const pantryMatchingMains = candidateMains.filter(r =>
-        r.ingredients.some(i => i.category !== '调料辅料' && isIngredientMatched(i, pantryIngredientIds))
-      );
-      if (pantryMatchingMains.length > 0) {
-        candidateMains = pantryMatchingMains;
+    // Rank within topTier
+    for (const c of topTier) {
+      let s = 100;
+      if (isLazyMode) {
+        if (c.onePot && c.recipes.length === 1) s += 150;
+        s += (3 - Math.min(3, c.cookwareCount)) * 40;
+        s += Math.max(0, 15 - c.activeTimeMinutes) * 6;
       }
-    }
-
-    if (avoidProtein) {
-      const filtered = candidateMains.filter(r => r.proteinSource !== avoidProtein);
-      if (filtered.length > 0) candidateMains = filtered;
-    }
-    if (preferredProtein) {
-      const matched = candidateMains.filter(r => r.proteinSource === preferredProtein);
-      if (matched.length > 0) candidateMains = matched;
-    }
-
-    const main = weightedPickByScore(candidateMains, scoringContext, {
-      topRatio: hasPantry ? (clearFridgeMode ? 0.2 : 0.3) : 0.35,
-      minPool: hasPantry ? (clearFridgeMode ? 2 : 3) : 4,
-      temperature: hasPantry ? 1.0 : 0.8,
-    }) || safeMains[0];
-
-    let candidateVegs = safeVegs.filter(v => !hasIngredientConflict(main, v));
-    if (candidateVegs.length === 0) candidateVegs = safeVegs;
-
-    if (activeFilters.includes('15min')) {
-      const quickVegs = candidateVegs.filter(v => v.cookTimeMinutes <= 12 || v.tags.includes('15分钟') || v.tags.includes('快手'));
-      if (quickVegs.length > 0) candidateVegs = quickVegs;
-    }
-
-    if (hasPantry) {
-      const pantryMatchingVegs = candidateVegs.filter(v =>
-        v.ingredients.some(i => i.category !== '调料辅料' && isIngredientMatched(i, pantryIngredientIds))
-      );
-      if (pantryMatchingVegs.length > 0) {
-        candidateVegs = pantryMatchingVegs;
+      if (clearFridgeMode) {
+        s += (c.coverage / pantryIngredientIds.length) * 150;
       }
+      if (preferredProtein && c.recipes.some(r => r.proteinSource === preferredProtein)) {
+        s += 100;
+      }
+      for (const r of c.recipes) {
+        if (favoriteRecipeIds.includes(r.id)) s += 60;
+        if (avoidRecipeIds.includes(r.id)) s -= 120;
+      }
+      c.score = s;
     }
 
-    const vegetable = weightedPickByScore(candidateVegs, scoringContext, {
-      topRatio: hasPantry ? (clearFridgeMode ? 0.2 : 0.3) : 0.4,
-      minPool: hasPantry ? (clearFridgeMode ? 2 : 3) : 4,
-      temperature: 0.8,
-    }) || safeVegs[0];
+    topTier.sort((a, b) => b.score - a.score);
 
-    const staple = weightedPickByScore(safeStaples, scoringContext, {
-      topRatio: 0.5,
-      minPool: hasPantry ? 2 : 3,
-      temperature: 0.8,
-    }) || safeStaples[0];
+    // Softmax-weighted sampling from top tier
+    const topPool = topTier.slice(0, Math.max(1, Math.min(6, Math.ceil(topTier.length * 0.6))));
+    const minScore = Math.min(...topPool.map(c => c.score));
+    const weights = topPool.map(c => Math.exp((c.score - minScore) / 40));
+    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+    let rand = Math.random() * totalWeight;
+    let chosen = topPool[0];
+    for (let i = 0; i < topPool.length; i++) {
+      if (rand < weights[i]) {
+        chosen = topPool[i];
+        break;
+      }
+      rand -= weights[i];
+    }
 
-    selectedRecipes = [main, vegetable, staple];
+    selectedRecipes = chosen.recipes;
+    complexity = chosen.complexity;
 
   } else {
-    // =========================================================================
-    // 3. Rich (丰盛多道): 2主菜 + 1蔬菜 + 1主食 + [1汤]
-    // =========================================================================
-    let candidateMains = [...safeMains];
-    const main1 = weightedPickByScore(candidateMains, scoringContext, { minPool: 3 }) || safeMains[0];
+    // Non-pantry path: standard complexity determination
+    if (isLazyMode) {
+      complexity = 'simple';
+    } else if (servings === 1) {
+      if (is15Min || isTooTroublesome) {
+        complexity = Math.random() < 0.85 ? 'simple' : 'standard';
+      } else if (isSinglePersonFilter) {
+        complexity = Math.random() < 0.72 ? 'simple' : 'standard';
+      } else {
+        complexity = Math.random() < 0.62 ? 'simple' : 'standard';
+      }
+    } else if (servings === 2) {
+      const rand = Math.random();
+      if (rand < 0.25) complexity = 'simple';
+      else if (rand < 0.95) complexity = 'standard';
+      else complexity = 'rich';
+    } else {
+      complexity = Math.random() < 0.55 ? 'rich' : 'standard';
+    }
 
-    const secondaryMains = safeMains.filter(m =>
-      m.id !== main1.id &&
-      m.proteinSource !== main1.proteinSource &&
-      !hasIngredientConflict(main1, m)
-    );
-    const main2 = secondaryMains.length > 0
-      ? weightedPickByScore(secondaryMains, scoringContext, { minPool: 2 })
-      : safeVegs[0];
+    if (complexity === 'simple') {
+      let candidateIntegrated = safeIntegrated.filter(r => !avoidRecipeIds.includes(r.id));
+      if (candidateIntegrated.length === 0) candidateIntegrated = safeIntegrated;
 
-    const candidateVegs = safeVegs.filter(v => !hasIngredientConflict(main1, v) && !hasIngredientConflict(main2, v));
-    const vegetable = candidateVegs.length > 0
-      ? weightedPickByScore(candidateVegs, scoringContext, { minPool: 2 })
-      : safeVegs[0];
+      if (avoidProtein) {
+        const filtered = candidateIntegrated.filter(r => r.proteinSource !== avoidProtein);
+        if (filtered.length > 0) candidateIntegrated = filtered;
+      }
+      if (preferredProtein) {
+        const matched = candidateIntegrated.filter(r => r.proteinSource === preferredProtein);
+        if (matched.length > 0) candidateIntegrated = matched;
+      }
 
-    const staple = weightedPickByScore(safeStaples, scoringContext, { minPool: 2 }) || safeStaples[0];
+      const primaryDish = weightedPickByScore(candidateIntegrated, scoringContext, {
+        topRatio: isLazyMode ? 0.25 : 0.35,
+        minPool: 3,
+        temperature: 0.8,
+      }) || candidateIntegrated[0];
 
-    const soupCandidates = safeSoups.filter(s =>
-      !hasIngredientConflict(main1, s) &&
-      !hasIngredientConflict(vegetable, s)
-    );
-    const soup = soupCandidates.length > 0
-      ? weightedPickByScore(soupCandidates, scoringContext, { minPool: 2 })
-      : undefined;
+      if (primaryDish && isTrueIntegratedMealRecipe(primaryDish, mealType)) {
+        if (Math.random() < 0.20 && !isLazyMode) {
+          const quickSides = safeVegs.filter(v =>
+            (v.cookTimeMinutes <= 8 || v.cookingMethod === '凉拌' || v.cookingMethod === '煮') &&
+            !hasIngredientConflict(primaryDish, v)
+          );
+          const sideDish = quickSides.length > 0
+            ? weightedPickByScore(quickSides, scoringContext, { minPool: 1 })
+            : undefined;
+          selectedRecipes = sideDish ? [primaryDish, sideDish] : [primaryDish];
+        } else {
+          selectedRecipes = [primaryDish];
+        }
+      } else {
+        const main = weightedPickByScore(safeMains, scoringContext, { minPool: 1 }) || safeMains[0];
+        const veg = safeVegs.find(v => !hasIngredientConflict(main, v)) || safeVegs[0];
+        const staple = safeStaples[0];
+        selectedRecipes = [main, veg, staple];
+      }
 
-    selectedRecipes = soup ? [main1, main2, vegetable, staple, soup] : [main1, main2, vegetable, staple];
+    } else if (complexity === 'standard') {
+      let candidateMains = [...safeMains];
+      if (avoidProtein) {
+        const filtered = candidateMains.filter(r => r.proteinSource !== avoidProtein);
+        if (filtered.length > 0) candidateMains = filtered;
+      }
+      if (preferredProtein) {
+        const matched = candidateMains.filter(r => r.proteinSource === preferredProtein);
+        if (matched.length > 0) candidateMains = matched;
+      }
+      if (activeFilters.includes('15min')) {
+        const quickMains = candidateMains.filter(r => r.cookTimeMinutes <= 15 || r.tags.includes('15分钟') || r.tags.includes('快手'));
+        if (quickMains.length > 0) candidateMains = quickMains;
+      }
+
+      const main = weightedPickByScore(candidateMains, scoringContext, {
+        topRatio: 0.35,
+        minPool: 4,
+        temperature: 0.8,
+      }) || candidateMains[0] || safeMains[0];
+
+      let candidateVegs = safeVegs.filter(v => !hasIngredientConflict(main, v));
+      if (candidateVegs.length === 0) candidateVegs = safeVegs;
+      if (activeFilters.includes('15min')) {
+        const quickVegs = candidateVegs.filter(v => v.cookTimeMinutes <= 12 || v.tags.includes('15分钟') || v.tags.includes('快手'));
+        if (quickVegs.length > 0) candidateVegs = quickVegs;
+      }
+
+      const vegetable = weightedPickByScore(candidateVegs, scoringContext, {
+        topRatio: 0.4,
+        minPool: 4,
+        temperature: 0.8,
+      }) || candidateVegs[0] || safeVegs[0];
+
+      const staple = weightedPickByScore(safeStaples, scoringContext, {
+        topRatio: 0.5,
+        minPool: 3,
+        temperature: 0.8,
+      }) || safeStaples[0];
+
+      selectedRecipes = [main, vegetable, staple];
+
+    } else {
+      let candidateMains = [...safeMains];
+      const main1 = weightedPickByScore(candidateMains, scoringContext, { minPool: 3 }) || safeMains[0];
+
+      let secondaryMains = safeMains.filter(m =>
+        m.id !== main1.id &&
+        m.proteinSource !== main1.proteinSource &&
+        !hasIngredientConflict(main1, m)
+      );
+      const main2 = secondaryMains.length > 0
+        ? weightedPickByScore(secondaryMains, scoringContext, { minPool: 2 })
+        : safeVegs[0];
+
+      let candidateVegs = safeVegs.filter(v => !hasIngredientConflict(main1, v) && !hasIngredientConflict(main2, v));
+      const vegetable = candidateVegs.length > 0
+        ? weightedPickByScore(candidateVegs, scoringContext, { minPool: 2 })
+        : safeVegs[0];
+
+      const staple = weightedPickByScore(safeStaples, scoringContext, { minPool: 2 }) || safeStaples[0];
+
+      const soupCandidates = safeSoups.filter(s =>
+        !hasIngredientConflict(main1, s) &&
+        !hasIngredientConflict(vegetable, s)
+      );
+      const soup = soupCandidates.length > 0
+        ? weightedPickByScore(soupCandidates, scoringContext, { minPool: 2 })
+        : undefined;
+
+      selectedRecipes = soup ? [main1, main2, vegetable, staple, soup] : [main1, main2, vegetable, staple];
+    }
   }
 
   // 4. Fail-Safe Completeness Audit & Auto-Repair
@@ -1013,6 +1276,45 @@ export function composeMeal(
     }
   } else {
     selectedRecipes = uniqueSelected;
+  }
+
+  // =========================================================================
+  // 4.1 Strict Pantry Intent Guardrail (V0.4.8.1)
+  // Guarantee: If legal recipes matching user's pantry ingredients exist,
+  // Tier C (0 pantry matches) is STRICTLY FORBIDDEN from being the final recommendation!
+  // =========================================================================
+  if (hasPantry) {
+    const finalMatched = getComboMatchedPantryIds(selectedRecipes, pantryIngredientIds);
+    if (finalMatched.length === 0) {
+      const legalPantryRecipes = pool.filter(r => getRecipeMatchedPantryIds(r, pantryIngredientIds).length > 0);
+      const fallbackPantry = legalPantryRecipes.length > 0 ? legalPantryRecipes : safePool.filter(r => getRecipeMatchedPantryIds(r, pantryIngredientIds).length > 0);
+
+      if (fallbackPantry.length > 0) {
+        // Sort by match count descending
+        fallbackPantry.sort((a, b) =>
+          getRecipeMatchedPantryIds(b, pantryIngredientIds).length -
+          getRecipeMatchedPantryIds(a, pantryIngredientIds).length
+        );
+
+        const pantryMain = fallbackPantry.find(r => r.category === 'main' || isTrueIntegratedMealRecipe(r, mealType));
+        if (pantryMain) {
+          if (isTrueIntegratedMealRecipe(pantryMain, mealType)) {
+            selectedRecipes = [pantryMain];
+          } else {
+            const veg = safeVegs.find(v => !hasIngredientConflict(pantryMain, v)) || safeVegs[0];
+            const staple = safeStaples[0];
+            selectedRecipes = [pantryMain, veg, staple];
+          }
+        } else {
+          const pantryVeg = fallbackPantry.find(r => isTrueVegetableRecipe(r));
+          if (pantryVeg) {
+            const main = safeMains.find(m => !hasIngredientConflict(m, pantryVeg)) || safeMains[0];
+            const staple = safeStaples[0];
+            selectedRecipes = [main, pantryVeg, staple];
+          }
+        }
+      }
+    }
   }
 
   // 5. V0.4.7.3 Macro Adequacy Layer (Lunch & Dinner - Bidirectional)
@@ -1118,7 +1420,7 @@ export function composeMeal(
 
   const activeTimeMinutes = selectedRecipes.length === 1
     ? (selectedRecipes[0].activeTimeMinutes || selectedRecipes[0].prepTimeMinutes || 7)
-    : Math.min(30, Math.max(...selectedRecipes.map(r => r.activeTimeMinutes || 6)) + (selectedRecipes.length - 1) * 3);
+    : Math.min(30, selectedRecipes.reduce((sum, r) => sum + (r.activeTimeMinutes || r.prepTimeMinutes || 5), 0));
 
   const passiveTimeMinutes = Math.max(...selectedRecipes.map(r => r.passiveTimeMinutes || r.cookTimeMinutes || 15));
   const totalTimeMinutes = isRiceCookerMeal ? Math.max(activeTimeMinutes + passiveTimeMinutes, selectedRecipes[0].timeMinutes) : activeTimeMinutes + passiveTimeMinutes;
@@ -1129,9 +1431,11 @@ export function composeMeal(
 
   const cookwareCount = isOnePotMeal
     ? 1
+    : selectedRecipes.length === 2
+    ? 2
     : Math.min(3, selectedRecipes.reduce((sum, r) => sum + (r.cookwareCount || 1), 0));
 
-  const isLazy = Boolean(isLazyMode || isRiceCookerMeal || (cookwareCount <= 1 && activeTimeMinutes <= 10));
+  const isLazy = Boolean(isLazyMode || isRiceCookerMeal || (cookwareCount <= 2 && activeTimeMinutes <= 12));
 
   // Determine overall difficulty
   const difficulties: RecipeDifficulty[] = selectedRecipes.map(r => r.difficulty);
@@ -1147,12 +1451,25 @@ export function composeMeal(
 
   let comboTitle = '';
   if (isLazy) {
-    const lazyTitles = [
-      `电饭煲懒人餐 · ${primaryName}`,
-      `免看火一锅搞定 · ${primaryName}`,
-      `少洗锅懒人餐 · ${primaryName}`,
-    ];
-    comboTitle = lazyTitles[Math.floor(Math.random() * lazyTitles.length)];
+    if (isOnePotMeal) {
+      const lazyTitles = [
+        `电饭煲懒人餐 · ${primaryName}`,
+        `免看火一锅搞定 · ${primaryName}`,
+        `一锅搞定懒人餐 · ${primaryName}`,
+      ];
+      comboTitle = lazyTitles[Math.floor(Math.random() * lazyTitles.length)];
+    } else if (selectedRecipes.length === 2) {
+      const otherDish = selectedRecipes.find(r => r.id !== anchorDish.id);
+      const otherName = otherDish ? otherDish.name.replace('家常', '').replace('经典', '').replace('爽脆', '').replace('鲜', '') : '';
+      const comboTitles = [
+        `少洗锅懒人餐 · ${primaryName}配${otherName}`,
+        `快手省心搭配 · ${primaryName} + ${otherName}`,
+        `少洗锅家常餐 · ${primaryName}伴${otherName}`,
+      ];
+      comboTitle = comboTitles[Math.floor(Math.random() * comboTitles.length)];
+    } else {
+      comboTitle = `少洗锅懒人餐 · ${primaryName}`;
+    }
   } else if (complexity === 'simple') {
     const simpleTitles = [
       `一人食一碗搞定 · ${primaryName}`,
@@ -1180,13 +1497,29 @@ export function composeMeal(
   let reason = '';
   if (pantryAudit && pantryAudit.matchedCount > 0) {
     const matchedNames = pantryAudit.matchedCanonicalNames.slice(0, 3).join('、');
-    if (isLazy) {
-      reason = `已优先用家里现有的【${matchedNames}】做一锅端，动手仅需 ${activeTimeMinutes} 分钟，剩下交给电饭煲，少洗锅超省心。`;
+    const isAllMatched = !pantryAudit.pantryFallback && pantryAudit.matchedPantryCount >= pantryIngredientIds.length;
+    if (pantryAudit.pantryFallback && pantryAudit.unusedPantryIngredients.length > 0) {
+      const unusedNames = pantryAudit.unusedPantryIngredients.slice(0, 2).join('、');
+      if (isLazy) {
+        if (isOnePotMeal) {
+          reason = `这顿优先省事，先用上【${matchedNames}】，【${unusedNames}】还没用上；一锅搞定免看火，动手仅约 ${activeTimeMinutes} 分钟。`;
+        } else {
+          reason = `这顿优先省事，先用上【${matchedNames}】，【${unusedNames}】还没用上；少洗锅免看火，动手仅约 ${activeTimeMinutes} 分钟。`;
+        }
+      } else {
+        reason = `这顿先用上家里的【${matchedNames}】，【${unusedNames}】还没用上；荤素搭配少买快做。`;
+      }
+    } else if (isLazy) {
+      reason = `已优先用家里现有的【${matchedNames}】做省心懒人餐，动手仅需 ${activeTimeMinutes} 分钟，少洗锅超省心。`;
     } else if (clearFridgeMode) {
-      reason = `已优先消耗家中现有的【${matchedNames}】，缺少食材仅需补充 ${pantryAudit.missingCount} 样，搭配省心不浪费。`;
+      reason = `【清冰箱优选】已最大限度利用家里的【${matchedNames}】${isAllMatched ? '（已全数覆盖）' : ''}，缺少食材仅需补充 ${pantryAudit.missingCount} 样，搭配省心不浪费。`;
+    } else if (isAllMatched && pantryIngredientIds.length >= 2) {
+      reason = `已全数利用家里现有的【${matchedNames}】（${pantryIngredientIds.length}/${pantryIngredientIds.length} 样完全覆盖），荤素搭配均衡，少买快做！`;
     } else {
       reason = `已充分利用家里现有的【${matchedNames}】，搭配当季清爽时蔬，营养均衡、少买快做。`;
     }
+  } else if (hasPantry) {
+    reason = `未找到完全契合所选食材的合规食谱组合，已为你推荐均衡美味家常搭配。`;
   } else if (isLazy) {
     reason = `备好食材，剩下交给电饭煲。动手仅约 ${activeTimeMinutes} 分钟，等待约 ${passiveTimeMinutes} 分钟，免看火少洗锅，下班回家静享美味。`;
   } else if (complexity === 'simple') {
@@ -1205,15 +1538,21 @@ export function composeMeal(
   if (pantryAudit && pantryAudit.matchedCount > 0) {
     tags.push(`已有 ${pantryAudit.matchedCount}/${pantryAudit.totalCount} 样食材`);
     if (clearFridgeMode) tags.push('清冰箱');
+    if (!pantryAudit.pantryFallback && pantryAudit.matchedPantryCount >= pantryIngredientIds.length && pantryIngredientIds.length >= 2) {
+      tags.push('食材全利用');
+    }
   }
   if (isLazy) {
     tags.push('懒人模式');
-    tags.push('免看火');
+    if (isOnePotMeal) tags.push('免看火');
+    else tags.push('少洗锅');
   } else if (complexity === 'simple') {
     tags.push('一碗搞定');
   }
   if (cookwareCount <= 1) {
     tags.push('1个锅');
+  } else if (cookwareCount === 2) {
+    tags.push('2个锅');
   }
   if (favoriteRecipeIds.includes(selectedRecipes[0].id)) {
     tags.push('包含收藏');
@@ -1243,6 +1582,8 @@ export function composeMeal(
     totalTimeMinutes,
     isLazy,
     cookwareCount,
+    onePot: isOnePotMeal,
+    isOnePot: isOnePotMeal,
     ingredientCount: new Set(
       selectedRecipes.flatMap(r => r.ingredients.filter(i => i.category !== '调料辅料').map(i => i.name))
     ).size,
@@ -1271,8 +1612,18 @@ export function composeMeal(
           })),
           matchedCanonicalNames: pantryAudit.matchedCanonicalNames,
           missingCanonicalNames: pantryAudit.missingCanonicalNames,
+          selectedPantryCount: pantryAudit.selectedPantryCount,
+          matchedPantryCount: pantryAudit.matchedPantryCount,
+          coverageRatio: pantryAudit.coverageRatio,
+          pantryFallback: pantryAudit.pantryFallback,
+          unusedPantryIngredients: pantryAudit.unusedPantryIngredients,
         }
       : undefined,
+    selectedPantryCount: pantryAudit?.selectedPantryCount,
+    matchedPantryCount: pantryAudit?.matchedPantryCount,
+    coverageRatio: pantryAudit?.coverageRatio,
+    pantryFallback: pantryAudit?.pantryFallback,
+    unusedPantryIngredients: pantryAudit?.unusedPantryIngredients,
   };
 }
 

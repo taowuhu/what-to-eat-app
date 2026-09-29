@@ -119,6 +119,11 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
           })),
           matchedCanonicalNames: pantryAudit.matchedCanonicalNames,
           missingCanonicalNames: pantryAudit.missingCanonicalNames,
+          selectedPantryCount: pantryAudit.selectedPantryCount,
+          matchedPantryCount: pantryAudit.matchedPantryCount,
+          coverageRatio: pantryAudit.coverageRatio,
+          pantryFallback: pantryAudit.pantryFallback,
+          unusedPantryIngredients: pantryAudit.unusedPantryIngredients,
         };
       }
     }
@@ -132,6 +137,11 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
       totalCarbs,
       totalFat,
       pantryCoverage: updatedPantryCoverage,
+      selectedPantryCount: updatedPantryCoverage?.selectedPantryCount ?? combo.selectedPantryCount,
+      matchedPantryCount: updatedPantryCoverage?.matchedPantryCount ?? combo.matchedPantryCount,
+      coverageRatio: updatedPantryCoverage?.coverageRatio ?? combo.coverageRatio,
+      pantryFallback: updatedPantryCoverage?.pantryFallback ?? combo.pantryFallback,
+      unusedPantryIngredients: updatedPantryCoverage?.unusedPantryIngredients ?? combo.unusedPantryIngredients,
     };
   }, [combo, servings, pantryIngredientIds, clearFridgeMode]);
 
@@ -558,6 +568,16 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
                   />
                 </div>
 
+                {/* Honest Fallback Notice when some pantry items were left unused */}
+                {pantryCoverage.pantryFallback && pantryCoverage.unusedPantryIngredients && pantryCoverage.unusedPantryIngredients.length > 0 && (
+                  <div className="p-2.5 rounded-xl bg-amber-50/90 border border-amber-200/80 text-xs text-amber-900 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                    <span>
+                      这顿先用上【{pantryCoverage.matchedCanonicalNames.slice(0, 3).join('、')}】，【{pantryCoverage.unusedPantryIngredients.join('、')}】还没用上
+                    </span>
+                  </div>
+                )}
+
                 {/* 1. 家里已有 */}
                 <div className="pt-1">
                   <div className="text-[11px] font-bold text-emerald-800 flex items-center justify-between mb-1.5 px-0.5">
@@ -662,10 +682,14 @@ export const RecommendationModal: React.FC<RecommendationModalProps> = ({
                         </button>
                       </div>
                     </div>
-                  ) : (
+                  ) : !pantryCoverage.pantryFallback ? (
                     <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl p-2.5 text-center text-xs text-emerald-800 font-bold flex items-center justify-center gap-1.5">
                       <Check className="w-4 h-4 text-emerald-600" />
                       <span>太棒了！所有主食材家中均有，无需额外买菜！</span>
+                    </div>
+                  ) : (
+                    <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-2.5 text-center text-xs text-amber-800 font-bold flex items-center justify-center gap-1.5">
+                      <span>本餐用到的主食材家中均有，剩余食材后续可再做一顿</span>
                     </div>
                   )}
                 </div>

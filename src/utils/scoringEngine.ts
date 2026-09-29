@@ -92,10 +92,18 @@ export function calculateRecipeScore(recipe: Recipe, context: ScoringContext = {
     historyRecipeIds = [],
   } = context;
 
-  // 1. Pantry match score
+  // 1. Pantry match score & Intent Tiering
   if (pantryIngredientIds.length > 0) {
     const pantryRes = calculateRecipePantryScore(recipe, pantryIngredientIds, clearFridgeMode);
     score += pantryRes.score;
+    if (pantryRes.matchedPantryCount >= 2) {
+      score += 150; // Extra boost for multi-pantry Tier A recipes
+    } else if (pantryRes.matchedPantryCount === 1) {
+      score += 40; // Tier B boost
+    } else {
+      // Intent Penalty: when user actively selects pantry ingredients, 0-match recipes get heavily de-prioritized
+      score *= clearFridgeMode ? 0.05 : 0.2;
+    }
   }
 
   // 2. Favorites (收藏 → 小幅增加权重)

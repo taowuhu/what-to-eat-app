@@ -22,21 +22,25 @@ export const CANONICAL_INGREDIENTS: CanonicalIngredient[] = [
     id: 'beef',
     name: '牛肉',
     category: '肉蛋奶',
-    aliases: ['牛里脊', '肥牛卷', '肥牛片', '牛肉片', '牛肉丝', '牛瘦肉', '牛排', '牛排肉', '牛肉粒'],
+    aliases: [
+      '牛里脊', '肥牛卷', '肥牛片', '牛肉片', '牛肉丝', '牛瘦肉', '牛排', '牛排肉', '牛肉粒',
+      '牛腿肉', '瘦牛肉', '牛肉块', '牛肉丁', '牛里脊肉', '新鲜牛里脊肉', '新鲜牛里脊或嫩牛肉',
+      '牛里脊薄片', '牛柳', '肥牛', '嫩牛肉', '牛腩', '牛腩肉', '牛腱', '牛腱肉'
+    ],
     isPopular: true,
   },
   {
     id: 'beef_brisket',
     name: '牛腩',
     category: '肉蛋奶',
-    aliases: ['牛腩肉', '牛腩块', '牛腩/牛腱肉', '牛腱', '牛腱肉', '牛腱子'],
+    aliases: ['牛腩肉', '牛腩块', '牛腩/牛腱肉', '牛腱', '牛腱肉', '牛腱子', '炖牛腩'],
     isPopular: false,
   },
   {
     id: 'chicken_breast',
     name: '鸡胸肉',
     category: '肉蛋奶',
-    aliases: ['鸡胸', '鸡大胸', '鸡小胸', '鸡胸肉丁', '鸡胸肉丝', '鸡柳', '鸡里脊'],
+    aliases: ['鸡胸', '鸡大胸', '鸡小胸', '鸡胸肉丁', '鸡胸肉丝', '鸡柳', '鸡里脊', '鸡胸肉条', '滑嫩鸡胸肉'],
     isPopular: true,
   },
   {
@@ -464,7 +468,7 @@ export const CANONICAL_INGREDIENTS: CanonicalIngredient[] = [
     id: 'shrimp',
     name: '鲜虾',
     category: '水产',
-    aliases: ['虾仁', '鲜虾仁', '基围虾', '青虾仁', '海虾', '大虾', '对虾', '活虾'],
+    aliases: ['虾仁', '鲜虾仁', '基围虾', '青虾仁', '海虾', '大虾', '对虾', '活虾', '虾'],
     isPopular: true,
   },
   {

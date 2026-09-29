@@ -172,6 +172,11 @@ export interface PantryCoverageInfo {
   missingIngredients: { name: string; amount: number; unit: string; category?: string }[];
   matchedCanonicalNames: string[];
   missingCanonicalNames: string[];
+  pantryFallback?: boolean;
+  selectedPantryCount?: number;
+  matchedPantryCount?: number;
+  coverageRatio?: number; // matchedPantryCount / selectedPantryCount
+  unusedPantryIngredients?: string[];
 }
 
 export interface MealCombo {
@@ -191,6 +196,11 @@ export interface MealCombo {
   tags: string[];
   recommendationReason: string;
   pantryCoverage?: PantryCoverageInfo;
+  pantryFallback?: boolean;
+  selectedPantryCount?: number;
+  matchedPantryCount?: number;
+  coverageRatio?: number;
+  unusedPantryIngredients?: string[];
 
   // V0.4.6 Meal Complexity & Lazy Cooking fields
   complexity?: MealComplexity;
@@ -199,6 +209,8 @@ export interface MealCombo {
   totalTimeMinutes?: number;
   isLazy?: boolean;
   cookwareCount?: number;
+  onePot?: boolean;
+  isOnePot?: boolean;
 
   // V0.4.7 Meal Nutrition Guardrails
   nutritionValidation?: MealNutritionValidationResult;

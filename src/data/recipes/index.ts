@@ -708,3 +708,21 @@ export function getRecipesByMealType(mealType: MealType): Recipe[] {
 export function getRecipesByProtein(protein: ProteinSource): Recipe[] {
   return ALL_RECIPES.filter(r => r.proteinSource === protein);
 }
+
+/**
+ * Domain Helpers: Distinguish between atomic Food Components (11 items) and Complete Recipes (170 dishes)
+ */
+export function isFoodComponent(recipe: Recipe | { id: string }): boolean {
+  return recipe.id.startsWith('cmp_');
+}
+
+export function isCompleteRecipe(recipe: Recipe | { id: string }): boolean {
+  return !recipe.id.startsWith('cmp_');
+}
+
+/**
+ * Returns strictly the 170 Complete Recipes for public catalog / library browsing
+ */
+export function getPublicRecipes(): Recipe[] {
+  return ALL_RECIPES.filter(isCompleteRecipe);
+}

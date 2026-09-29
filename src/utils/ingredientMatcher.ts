@@ -77,21 +77,79 @@ export function isIngredientMatched(
   selectedCanonicalIds: string[]
 ): boolean {
   if (!selectedCanonicalIds || selectedCanonicalIds.length === 0) return false;
+
+  // Household seasonings / condiments do NOT count towards pantry matching unless specifically selected
+  if (isSeasoningOrAuxiliary(ingredient.category, ingredient.name)) {
+    const canonical = findCanonicalIngredient(ingredient.name);
+    if (!canonical || !selectedCanonicalIds.includes(canonical.id)) {
+      return false;
+    }
+  }
+
   const canonical = findCanonicalIngredient(ingredient.name);
   if (!canonical) {
     const clean = cleanIngredientName(ingredient.name);
     return selectedCanonicalIds.some(id => id === clean || clean.includes(id) || id.includes(clean));
   }
-  return (
-    selectedCanonicalIds.includes(canonical.id) ||
-    selectedCanonicalIds.includes(canonical.name) ||
-    selectedCanonicalIds.some(
-      token =>
-        canonical.aliases.includes(token) ||
-        canonical.name.includes(token) ||
-        token.includes(canonical.name)
-    )
+
+  // Direct ID or name match
+  if (selectedCanonicalIds.includes(canonical.id) || selectedCanonicalIds.includes(canonical.name)) {
+    return true;
+  }
+
+  // Cross-matching for related meat cuts / forms (e.g. beef and beef_brisket)
+  const relatedGroups: Record<string, string[]> = {
+    beef: ['beef', 'beef_brisket'],
+    beef_brisket: ['beef', 'beef_brisket'],
+  };
+  const group = relatedGroups[canonical.id];
+  if (group && group.some(gid => selectedCanonicalIds.includes(gid))) {
+    return true;
+  }
+
+  return selectedCanonicalIds.some(
+    token =>
+      canonical.aliases.includes(token) ||
+      canonical.name.includes(token) ||
+      token.includes(canonical.name)
   );
+}
+
+/**
+ * Returns the list of unique canonical pantry IDs matched by a single recipe
+ */
+export function getRecipeMatchedPantryIds(
+  recipe: Recipe,
+  selectedCanonicalIds: string[]
+): string[] {
+  if (!selectedCanonicalIds || selectedCanonicalIds.length === 0) return [];
+  const matched = new Set<string>();
+  for (const ing of recipe.ingredients) {
+    if (ing.category === '调料辅料' || isSeasoningOrAuxiliary(ing.category, ing.name)) continue;
+    for (const pid of selectedCanonicalIds) {
+      if (isIngredientMatched(ing, [pid])) {
+        matched.add(pid);
+      }
+    }
+  }
+  return Array.from(matched);
+}
+
+/**
+ * Returns the list of unique canonical pantry IDs matched across a meal combination
+ */
+export function getComboMatchedPantryIds(
+  recipes: Recipe[],
+  selectedCanonicalIds: string[]
+): string[] {
+  if (!selectedCanonicalIds || selectedCanonicalIds.length === 0) return [];
+  const matched = new Set<string>();
+  for (const r of recipes) {
+    for (const pid of getRecipeMatchedPantryIds(r, selectedCanonicalIds)) {
+      matched.add(pid);
+    }
+  }
+  return Array.from(matched);
 }
 
 export interface MealPantryAudit {
@@ -104,6 +162,11 @@ export interface MealPantryAudit {
   matchedCanonicalNames: string[];
   missingCanonicalNames: string[];
   scoreBonus: number;
+  selectedPantryCount: number;
+  matchedPantryCount: number;
+  coverageRatio: number;
+  pantryFallback: boolean;
+  unusedPantryIngredients: string[];
 }
 
 /**
@@ -112,7 +175,7 @@ export interface MealPantryAudit {
 export function isSeasoningOrAuxiliary(category?: string, name?: string): boolean {
   if (category === '调料辅料') return true;
   if (!name) return false;
-  const seasonings = ['盐', '油', '生抽', '老抽', '料酒', '醋', '糖', '胡椒粉', '蚝油', '淀粉', '葱', '姜', '蒜'];
+  const seasonings = ['盐', '油', '生抽', '老抽', '料酒', '醋', '糖', '胡椒粉', '蚝油', '淀粉', '葱', '姜', '蒜', '花椒', '八角', '生粉'];
   return seasonings.some(s => name.includes(s));
 }
 
@@ -136,17 +199,21 @@ export function auditMealPantryCoverage(
       matchedCanonicalNames: [],
       missingCanonicalNames: [],
       scoreBonus: 0,
+      selectedPantryCount: 0,
+      matchedPantryCount: 0,
+      coverageRatio: 1,
+      pantryFallback: false,
+      unusedPantryIngredients: [],
     };
   }
 
   // Aggregate unique non-seasoning ingredients (or all primary items)
   const seenCanonicalMap = new Map<string, { ingredient: Ingredient; canonical: CanonicalIngredient | null }>();
-  const unmappedIngredients: Ingredient[] = [];
 
   for (const recipe of recipes) {
     for (const ing of recipe.ingredients) {
-      if (ing.category === '调料辅料') {
-        // Exclude salt, oil, soy sauce from "pantry lack" unless it's a primary food
+      if (ing.category === '调料辅料' || isSeasoningOrAuxiliary(ing.category, ing.name)) {
+        // Exclude salt, oil, soy sauce, garlic, ginger, scallion from pantry coverage calculation
         continue;
       }
 
@@ -187,23 +254,8 @@ export function auditMealPantryCoverage(
   const matchedCanonicalNames: string[] = [];
   const missingCanonicalNames: string[] = [];
 
-  for (const [key, item] of seenCanonicalMap.entries()) {
-    const isMatched = item.canonical
-      ? (
-          selectedCanonicalIds.includes(item.canonical.id) ||
-          selectedCanonicalIds.includes(item.canonical.name) ||
-          selectedCanonicalIds.some(
-            token =>
-              item.canonical?.aliases.includes(token) ||
-              item.canonical?.name.includes(token) ||
-              token.includes(item.canonical?.name || '')
-          )
-        )
-      : selectedCanonicalIds.some(
-          token =>
-            item.ingredient.name.includes(token) ||
-            token.includes(cleanIngredientName(item.ingredient.name))
-        );
+  for (const [, item] of seenCanonicalMap.entries()) {
+    const isMatched = isIngredientMatched(item.ingredient, selectedCanonicalIds);
 
     if (isMatched) {
       matched.push(item);
@@ -218,6 +270,14 @@ export function auditMealPantryCoverage(
   const matchedCount = matched.length;
   const missingCount = missing.length;
   const coverageRate = totalCount > 0 ? matchedCount / totalCount : 0;
+
+  const comboMatchedPantryIds = getComboMatchedPantryIds(recipes, selectedCanonicalIds);
+  const selectedPantryCount = selectedCanonicalIds.length;
+  const matchedPantryCount = comboMatchedPantryIds.length;
+  const coverageRatio = selectedPantryCount > 0 ? matchedPantryCount / selectedPantryCount : 1;
+  const unusedPantryIds = selectedCanonicalIds.filter(id => !comboMatchedPantryIds.includes(id));
+  const unusedPantryIngredients = unusedPantryIds.map(id => CANONICAL_ID_MAP.get(id)?.name || id);
+  const pantryFallback = matchedPantryCount < selectedPantryCount;
 
   // Calculate recommendation score bonus
   // If clearFridgeMode is true, heavy bonus on consuming maximum available items
@@ -238,5 +298,10 @@ export function auditMealPantryCoverage(
     matchedCanonicalNames,
     missingCanonicalNames,
     scoreBonus,
+    selectedPantryCount,
+    matchedPantryCount,
+    coverageRatio,
+    pantryFallback,
+    unusedPantryIngredients,
   };
 }
