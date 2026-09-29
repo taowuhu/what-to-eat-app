@@ -1181,7 +1181,7 @@ export const QAReportView: React.FC<{ onBackToHome: () => void }> = ({ onBackToH
                         {Object.entries(res.metrics).map(([k, v]) => (
                           <div key={k} className="bg-white p-2.5 rounded-xl border border-stone-200/70">
                             <span className="text-[10px] text-stone-400 block">{k}</span>
-                            <span className="text-xs font-bold text-stone-800 font-mono mt-0.5 block">{v}</span>
+                            <span className="text-xs font-bold text-stone-800 font-mono mt-0.5 block">{String(v)}</span>
                           </div>
                         ))}
                       </div>
